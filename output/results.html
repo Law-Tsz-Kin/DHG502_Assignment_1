@@ -100,7 +100,7 @@ const runInfo=[
   {key:'sentence',label:'Sentence Analysis'}
 ];
 const columns=[
-  ['collocate','Collocate','text'],['obs_local','Observed local','number'],
+  ['rank','Rank','number'],['collocate','Collocate','text'],['obs_local','Observed local','number'],
   ['exp_local','Expected local','number'],['obs_global','Observed global','number'],
   ['ratio_local','Local ratio','number'],['log_likelihood','Log-likelihood','number'],
   ['log_dice','logDice','number'],['p_value','p-value','number'],
@@ -155,7 +155,7 @@ function makeSortableTable(container,rows,tableColumns,initialKey,initialAscendi
   draw();
 }
 function renderRun(key){
-  const rows=datasets[key];
+  const rows=datasets[key].map((row,index)=>({...row,rank:index+1}));
   const ranked=[...rows].sort((a,b)=>b.log_dice-a.log_dice);
   const best=ranked[0];
   const cards=[

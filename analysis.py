@@ -354,16 +354,18 @@ def build_collocation_tables(datasets):
         key: frame.head(TABLE_TOP_N)
         for key, frame in ranked_runs.items()
     }
-    union = {}
+    top_ten_ranks = {}
     for key in run_keys:
-        for rank, row in ranked_top_runs[key].iterrows():
-            entry = union.setdefault(row['collocate'], {})
-            entry[key] = rank + 1
+        top_ten_ranks[key] = {
+            row['collocate']: rank + 1
+            for rank, row in ranked_top_runs[key].iterrows()
+        }
+    union = set().union(*(set(ranks) for ranks in top_ten_ranks.values()))
     ordered_collocates = sorted(
         union,
         key=lambda word: (
-            min(union[word].values()),
-            sum(union[word].values()),
+            min(ranks[word] for ranks in top_ten_ranks.values() if word in ranks),
+            sum(ranks[word] for ranks in top_ten_ranks.values() if word in ranks),
             word,
         ),
     )
@@ -374,27 +376,26 @@ def build_collocation_tables(datasets):
             method_rows = ranked_runs[key]
             matches = method_rows.index[method_rows['collocate'] == word]
             if matches.empty:
-                row.extend(['—', '—', '—'])
+                row.append('—')
             else:
-                rank = int(matches[0]) + 1
-                method_row = method_rows.iloc[rank - 1]
-                row.extend([
-                    rank,
-                    f"{method_row['log_dice']:.3f}",
-                    f"{method_row['log_likelihood']:.3f}",
-                ])
+                method_row = method_rows.iloc[int(matches[0])]
+                row.append(
+                    f"{method_row['log_dice']:.3f} "
+                    f"(n={int(method_row['obs_local'])})"
+                )
         cross_method_rows.append(row)
     render_table_image(
         'Table 2. Top 10 Collocates Across Methods',
-        'Union of each method’s top 10 ranked by logDice; ranks and scores are shown wherever the collocate occurs.',
+        'Union of the top 10 per method ranked by logDice. Cells show logDice (observed frequency); — indicates absence (p ≥ 0.05).',
         [
             'Collocate',
-            '5-Word rank', '5-Word logDice', '5-Word log-likelihood',
-            '10-Word rank', '10-Word logDice', '10-Word log-likelihood',
-            'Sentence rank', 'Sentence logDice', 'Sentence log-likelihood',
+            '5-word window',
+            '10-word window',
+            'Sentence',
         ],
         cross_method_rows,
         TABLE2_OUT,
+        row_height=0.5,
     )
 
 
@@ -717,7 +718,7 @@ const runInfo=[
   {key:'sentence',label:'Sentence Analysis'}
 ];
 const columns=[
-  ['collocate','Collocate','text'],['obs_local','Observed local','number'],
+  ['rank','Rank','number'],['collocate','Collocate','text'],['obs_local','Observed local','number'],
   ['exp_local','Expected local','number'],['obs_global','Observed global','number'],
   ['ratio_local','Local ratio','number'],['log_likelihood','Log-likelihood','number'],
   ['log_dice','logDice','number'],['p_value','p-value','number'],
@@ -772,7 +773,7 @@ function makeSortableTable(container,rows,tableColumns,initialKey,initialAscendi
   draw();
 }
 function renderRun(key){
-  const rows=datasets[key];
+  const rows=datasets[key].map((row,index)=>({...row,rank:index+1}));
   const ranked=[...rows].sort((a,b)=>b.log_dice-a.log_dice);
   const best=ranked[0];
   const cards=[
