@@ -46,16 +46,17 @@ MIN_WORDS = 5
 N_SAMPLES = 20
 SEED = 42
 SAMPLE_TARGET = '倭'
-MIN_WORD_LENGTH = 2
+MIN_WORD_LENGTH = 1
 ADJUSTED_P_THRESHOLD = 0.05
 MAX_COLLOCATES = 20
 HTML_OUT = os.path.join(OUTDIR, 'results.html')
 KWIC_HTML_OUT = os.path.join(OUTDIR, 'kwic.html')
 TABLE1_OUT = os.path.join(OUTDIR, 'table1_significance_vs_strength_5word.png')
 TABLE2_OUT = os.path.join(OUTDIR, 'table2_top_collocates_comparison.png')
-KWIC_COLLOCATES = ['朝鲜', '登岸', '沈惟敬', '秀吉']
+KWIC_COLLOCATES = ['朝鲜', '新', '移西', '沈惟敬', '秀吉']
 KWIC_LIMIT = 10
 TABLE_TOP_N = 10
+MISSING_TABLE_GLYPHS = set()
 
 SENT_END = re.compile(r'([。！？；]」?)')
 JUAN_RE = re.compile(r'^卷[一二三四五六七八九十百〇零]+$')
@@ -221,6 +222,7 @@ def build_results_html():
 
 def configure_table_font(datasets):
     """Use the bundled Simplified Chinese font and verify required glyph coverage."""
+    global MISSING_TABLE_GLYPHS
     required_chars = set('倭显著性强度搭配词校正方法排名分数')
     for df in datasets.values():
         if 'collocate' in df:
@@ -234,7 +236,13 @@ def configure_table_font(datasets):
     charmap = FT2Font(font_path).get_charmap()
     missing_chars = sorted(char for char in required_chars if ord(char) not in charmap)
     if missing_chars:
-        raise RuntimeError(f'The bundled CJK font is missing glyphs: {"".join(missing_chars)}')
+        MISSING_TABLE_GLYPHS = set(missing_chars)
+        missing_codes = ', '.join(f'U+{ord(char):04X}' for char in missing_chars)
+        print(
+            'Warning: the bundled CJK font lacks glyphs '
+            f'{missing_codes}; PNG tables will show their Unicode codes. '
+            'CSV and HTML retain the original characters.'
+        )
     font_manager.fontManager.addfont(font_path)
     matplotlib.rcParams['font.family'] = font_manager.FontProperties(
         fname=font_path,
@@ -243,6 +251,14 @@ def configure_table_font(datasets):
 
 def render_table_image(title, subtitle, columns, rows, output_path, *, row_height=0.42):
     """Render a titled, styled table as a standalone PNG."""
+    def display_text(value):
+        text = str(value)
+        for char in MISSING_TABLE_GLYPHS:
+            text = text.replace(char, f'[U+{ord(char):04X}]')
+        return text
+
+    columns = [display_text(column) for column in columns]
+    rows = [[display_text(value) for value in row] for row in rows]
     width = max(11, len(columns) * 1.7)
     height = 1.8 + max(1, len(rows)) * row_height
     figure, axis = plt.subplots(figsize=(width, height))
@@ -508,7 +524,7 @@ th{{background:#eef3f4;white-space:nowrap}}
 <header>
 <div class="eyebrow">Keywords in Context · 明史</div>
 <h1>KWIC: Collocation Analysis of “倭” Represent throughout Ming Shi 明史</h1>
-<p>Concordance passages for 倭 and 朝鲜, 登岸, 沈惟敬, 秀吉, within 5-word, 10-word, and sentence horizons.</p>
+<p>Concordance passages for 倭 and 朝鲜, 新, 移西, 沈惟敬, 秀吉, within 5-word, 10-word, and sentence horizons.</p>
 <p class="muted">{html.escape(index_metadata)} Each row reports the counts of 倭 and the selected collocate in its full sentence.</p>
 </header>
 <main>{''.join(sections)}</main>
