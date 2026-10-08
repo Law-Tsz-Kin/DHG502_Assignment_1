@@ -9,8 +9,9 @@ analysis.py — 《明史》「倭」字搭配（collocation）分析
     collocates_倭_window_h5.csv  — 前後各 5 詞的窗口
     collocates_倭_window_h10.csv — 前後各 10 詞的窗口
     collocates_倭_sentence.csv   — 同句搭配
+    kwic.csv                    — 五詞窗口 KWIC concordance
     results.html                — 可互動的五頁英文分析報告
-    kwic.html                   — 指定搭配詞於不同語境跨度的 KWIC concordance
+    kwic.html                   — 五詞窗口 KWIC concordance
     table1_significance_vs_strength_5word.png
     table2_top_collocates_comparison.png
 """
@@ -47,13 +48,14 @@ N_SAMPLES = 20
 SEED = 42
 SAMPLE_TARGET = '倭'
 MIN_WORD_LENGTH = 1
-ADJUSTED_P_THRESHOLD = 0.05
+P_VALUE_THRESHOLD = 0.05
 MAX_COLLOCATES = 20
 HTML_OUT = os.path.join(OUTDIR, 'results.html')
 KWIC_HTML_OUT = os.path.join(OUTDIR, 'kwic.html')
+KWIC_CSV_OUT = os.path.join(OUTDIR, 'kwic.csv')
 TABLE1_OUT = os.path.join(OUTDIR, 'table1_significance_vs_strength_5word.png')
 TABLE2_OUT = os.path.join(OUTDIR, 'table2_top_collocates_comparison.png')
-KWIC_COLLOCATES = ['朝鲜', '新', '移西', '沈惟敬', '秀吉']
+KWIC_COLLOCATES = ['海上', '入寇', '朝鲜', '新']
 KWIC_LIMIT = 10
 TABLE_TOP_N = 10
 MISSING_TABLE_GLYPHS = set()
@@ -202,9 +204,12 @@ def prepare_corpus():
 
 def build_results_html():
     datasets = {}
+    significant_counts = {}
     for run in RUNS:
         input_path = os.path.join(OUTDIR, run['filename'])
-        df = pd.read_csv(input_path, encoding='utf-8-sig')
+        full_df = pd.read_csv(input_path, encoding='utf-8-sig')
+        significant_counts[run['key']] = len(full_df)
+        df = full_df.head(MAX_COLLOCATES)
         datasets[run['key']] = [
             {
                 key: None if value != value else value.item() if hasattr(value, 'item') else value
@@ -212,6 +217,7 @@ def build_results_html():
             }
             for row in df.to_dict(orient='records')
         ]
+    datasets['significant_counts'] = significant_counts
 
     data_json = json.dumps(datasets, ensure_ascii=False, allow_nan=False)
     data_json = data_json.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
@@ -297,7 +303,7 @@ def render_table_image(title, subtitle, columns, rows, output_path, *, row_heigh
 
 
 def build_collocation_tables(datasets):
-    """Create top-10 significance/strength and cross-method comparison tables."""
+    """Create summary tables for the 5-word window and cross-method collocates."""
     configure_table_font(datasets)
     five_word = datasets['window_h5']
     significance = five_word.sort_values(
@@ -342,19 +348,23 @@ def build_collocation_tables(datasets):
             ['log_dice', 'collocate'],
             ascending=[False, True],
             kind='mergesort',
-        ).head(TABLE_TOP_N).reset_index(drop=True)
+        ).reset_index(drop=True)
         for key in run_keys
     }
+    ranked_top_runs = {
+        key: frame.head(TABLE_TOP_N)
+        for key, frame in ranked_runs.items()
+    }
     union = {}
-    for key, label in zip(run_keys, run_labels):
-        for rank, row in ranked_runs[key].iterrows():
+    for key in run_keys:
+        for rank, row in ranked_top_runs[key].iterrows():
             entry = union.setdefault(row['collocate'], {})
-            entry[key] = (rank + 1, row['log_dice'])
+            entry[key] = rank + 1
     ordered_collocates = sorted(
         union,
         key=lambda word: (
-            min(rank for rank, _ in union[word].values()),
-            sum(rank for rank, _ in union[word].values()),
+            min(union[word].values()),
+            sum(union[word].values()),
             word,
         ),
     )
@@ -362,21 +372,27 @@ def build_collocation_tables(datasets):
     for word in ordered_collocates:
         row = [word]
         for key in run_keys:
-            rank_and_score = union[word].get(key)
-            if rank_and_score is None:
-                row.extend(['—', '—'])
+            method_rows = ranked_runs[key]
+            matches = method_rows.index[method_rows['collocate'] == word]
+            if matches.empty:
+                row.extend(['—', '—', '—'])
             else:
-                rank, score = rank_and_score
-                row.extend([rank, f'{score:.3f}'])
+                rank = int(matches[0]) + 1
+                method_row = method_rows.iloc[rank - 1]
+                row.extend([
+                    rank,
+                    f"{method_row['log_dice']:.3f}",
+                    f"{method_row['log_likelihood']:.3f}",
+                ])
         cross_method_rows.append(row)
     render_table_image(
-        'Table 2. Top Collocates Across Context Methods',
-        'Union of each method’s top 10 collocates ranked by logDice; — means not in that method’s top 10.',
+        'Table 2. Top 10 Collocates Across Methods',
+        'Union of each method’s top 10 ranked by logDice; ranks and scores are shown wherever the collocate occurs.',
         [
             'Collocate',
-            '5-Word rank', '5-Word logDice',
-            '10-Word rank', '10-Word logDice',
-            'Sentence rank', 'Sentence logDice',
+            '5-Word rank', '5-Word logDice', '5-Word log-likelihood',
+            '10-Word rank', '10-Word logDice', '10-Word log-likelihood',
+            'Sentence rank', 'Sentence logDice', 'Sentence log-likelihood',
         ],
         cross_method_rows,
         TABLE2_OUT,
@@ -397,12 +413,9 @@ def build_kwic_html():
             raise ValueError(f'{INDEX_CSV} is missing columns: {", ".join(sorted(missing))}')
         index_by_line = index_df.set_index('line_no')[['juan_no', 'juan_title']].to_dict('index')
 
-    methods = [
-        ('5-Word', 5),
-        ('10-Word', 10),
-        ('Sentence', corpus.token_count),
-    ]
+    methods = [('5-Word', 5)]
     sections = []
+    csv_rows = []
     for method, horizon in methods:
         matches = kwic(
             sentences=corpus,
@@ -425,6 +438,7 @@ def build_kwic_html():
                 passage = passages[doc_index]
                 metadata = index_by_line.get(doc_index + 1, {})
                 rows.append({
+                    'collocate': collocate,
                     'juan_no': metadata.get('juan_no'),
                     'juan_title': metadata.get('juan_title'),
                     'left': result['left'],
@@ -436,6 +450,7 @@ def build_kwic_html():
                 })
                 if len(rows) >= KWIC_LIMIT:
                     break
+            csv_rows.extend(rows)
 
             table_rows = []
             for row in rows:
@@ -478,14 +493,6 @@ def build_kwic_html():
                 f'{table}</section>'
             )
 
-        method_sections = sections[-len(KWIC_COLLOCATES):]
-        sections[-len(KWIC_COLLOCATES):] = [
-            f'<section class="method" id="{method.lower().replace("-", "")}">'
-            f'<h2>{html.escape(method)} horizon</h2>'
-            + ''.join(method_sections)
-            + '</section>'
-        ]
-
     index_metadata = (
         'Volume number and title are taken from data/index.csv.'
         if index_by_line else
@@ -524,13 +531,21 @@ th{{background:#eef3f4;white-space:nowrap}}
 <header>
 <div class="eyebrow">Keywords in Context · 明史</div>
 <h1>KWIC: Collocation Analysis of “倭” Represent throughout Ming Shi 明史</h1>
-<p>Concordance passages for 倭 and 朝鲜, 新, 移西, 沈惟敬, 秀吉, within 5-word, 10-word, and sentence horizons.</p>
+<p>5-word-window concordance passages for 倭 and 朝鲜, 新, 移西, 沈惟敬, 秀吉.</p>
 <p class="muted">{html.escape(index_metadata)} Each row reports the counts of 倭 and the selected collocate in its full sentence.</p>
 </header>
 <main>{''.join(sections)}</main>
 </body>
 </html>
 """
+    csv_columns = [
+        'collocate', 'juan_no', 'juan_title', 'left', 'node', 'right',
+        'passage', 'target_count', 'collocate_count',
+    ]
+    pd.DataFrame(csv_rows, columns=csv_columns).to_csv(
+        KWIC_CSV_OUT, index=False, encoding='utf-8-sig',
+    )
+    print(f'KWIC CSV → {KWIC_CSV_OUT} ({len(csv_rows)} passages)')
     with open(KWIC_HTML_OUT, 'w', encoding='utf-8') as html_file:
         html_file.write(html_document)
     print(f'KWIC report → {KWIC_HTML_OUT}')
@@ -544,6 +559,7 @@ def main():
 
     stopwords = load_stopwords('zh_cl_sim')
     table_datasets = {}
+    printed_datasets = {}
     for run in RUNS:
         method, horizon, label = run['method'], run['horizon'], run['key']
         df = find_collocates(
@@ -555,23 +571,44 @@ def main():
             filters={
                 'stopwords': stopwords,
                 'min_word_length': MIN_WORD_LENGTH,
-                'max_adjusted_p': ADJUSTED_P_THRESHOLD,
             },
             correction='fdr_bh',
             sort_by='log_dice',
             ascending=False,
             return_type='dataframe',
         )
-        if 'adjusted_p_value' in df.columns:
-            df = df.loc[df['adjusted_p_value'] < ADJUSTED_P_THRESHOLD]
-            df = df.sort_values('log_dice', ascending=False, kind='mergesort')
+        df = df.loc[df['p_value'] < P_VALUE_THRESHOLD]
+        df = df.sort_values(
+            ['log_dice', 'collocate'],
+            ascending=[False, True],
+            kind='mergesort',
+        )
         table_datasets[run['key']] = df.copy()
-        df = df.head(MAX_COLLOCATES).copy()
+        printed_datasets[run['key']] = df.head(MAX_COLLOCATES).copy()
 
         output_path = os.path.join(OUTDIR, f'collocates_{TARGET}_{label}.csv')
         df.to_csv(output_path, index=False, encoding='utf-8-sig')
-        print(f'搭配詞結果（{label}）→ {output_path}（{len(df)} 列）')
-        print(df.to_string(index=False))
+
+    shared_collocates = set.intersection(
+        *(set(dataset['collocate']) for dataset in table_datasets.values())
+    )
+    if shared_collocates:
+        print(
+            'Console output excludes collocates present in all three methods: '
+            + ', '.join(sorted(shared_collocates))
+        )
+    for run in RUNS:
+        label = run['key']
+        output_path = os.path.join(OUTDIR, run['filename'])
+        printed_df = printed_datasets[label]
+        printed_df = printed_df.loc[
+            ~printed_df['collocate'].isin(shared_collocates)
+        ]
+        print(
+            f'搭配詞結果（{label}）→ {output_path}'
+            f'（CSV {len(table_datasets[label])} 列；列印 {len(printed_df)} 列）'
+        )
+        print(printed_df.to_string(index=False))
         print()
 
     build_collocation_tables(table_datasets)
@@ -644,22 +681,22 @@ input{min-width:min(300px,100%)}
 <h1>Collocation Analysis of “倭” Represent throughout Ming Shi 明史</h1>
 <p class="lead">A comparison of words associated with 倭 in the Ming Shi, using two word-window sizes and whole-sentence context.</p>
 <div class="cards" id="overview-cards"></div>
-<p class="note">Use the navigation bar above to open each analysis. Click any table heading to reorder its results; page 5 lets you compare scores across all three methods.</p>
+<p class="note">Pages 2–4 show the top 20 collocates in each method. Page 5 compares the methods.</p>
 <div class="page-number">Page 1 of 5</div>
 </section>
 <section class="page" id="page-2">
 <div class="eyebrow">Window method · horizon = 5</div><h2>5-Word Analysis</h2>
-<p class="subtitle">Collocates within five tokens to either side of 倭. All reported results pass the adjusted p-value threshold.</p>
+<p class="subtitle">Top 20 collocates by logDice from all collocates with p-value &lt; 0.05, within five tokens to either side of 倭. Adjusted p-values are reported but are not used as an inclusion filter.</p>
 <div class="cards" id="stats-window_h5"></div><div class="table-wrap" id="table-window_h5"></div><div class="page-number">Page 2 of 5</div>
 </section>
 <section class="page" id="page-3">
 <div class="eyebrow">Window method · horizon = 10</div><h2>10-Word Analysis</h2>
-<p class="subtitle">Collocates within ten tokens to either side of 倭. All reported results pass the adjusted p-value threshold.</p>
+<p class="subtitle">Top 20 collocates by logDice from all collocates with p-value &lt; 0.05, within ten tokens to either side of 倭. Adjusted p-values are reported but are not used as an inclusion filter.</p>
 <div class="cards" id="stats-window_h10"></div><div class="table-wrap" id="table-window_h10"></div><div class="page-number">Page 3 of 5</div>
 </section>
 <section class="page" id="page-4">
 <div class="eyebrow">Sentence method</div><h2>Sentence Analysis</h2>
-<p class="subtitle">Collocates occurring in the same sentence as 倭. All reported results pass the adjusted p-value threshold.</p>
+<p class="subtitle">Top 20 collocates by logDice from all collocates with p-value &lt; 0.05, occurring in the same sentence as 倭. Adjusted p-values are reported but are not used as an inclusion filter.</p>
 <div class="cards" id="stats-sentence"></div><div class="table-wrap" id="table-sentence"></div><div class="page-number">Page 4 of 5</div>
 </section>
 <section class="page" id="page-5">
@@ -740,9 +777,9 @@ function renderRun(key){
   const ranked=[...rows].sort((a,b)=>b.log_dice-a.log_dice);
   const best=ranked[0];
   const cards=[
-    ['Significant collocates',rows.length.toLocaleString()],
+    ['Collocates with p-value < 0.05',datasets.significant_counts[key].toLocaleString()],
+    ['Shown in this table',rows.length+' (top 20)'],
     ['Highest logDice',best?best.collocate+' · '+formatValue(best.log_dice,'log_dice'):'—'],
-    ['Adjusted p-value criterion','FDR-adjusted p < 0.05']
   ];
   const container=document.getElementById('stats-'+key);
   container.replaceChildren(...cards.map(([label,value])=>{
@@ -753,7 +790,7 @@ function renderRun(key){
 }
 runInfo.forEach(run=>renderRun(run.key));
 document.getElementById('overview-cards').innerHTML=runInfo.map(run=>
-  '<div class="card">'+run.label+'<strong>'+datasets[run.key].length.toLocaleString()+' significant collocates</strong></div>'
+  '<div class="card">'+run.label+'<strong>'+datasets.significant_counts[run.key].toLocaleString()+' collocates (p < 0.05)</strong></div>'
 ).join('');
 const metricChoice=document.getElementById('metric-choice'),searchInput=document.getElementById('compare-search');
 let comparisonSortKey='rank-window_h5',comparisonAscending=true;
