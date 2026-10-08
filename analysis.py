@@ -1,0 +1,623 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+analysis.py — 《明史》「倭」字搭配（collocation）分析
+執行本腳本即可預處理語料、分析搭配詞並產生互動報告：
+    python analysis.py
+
+搭配詞結果輸出（output/）：
+    collocates_倭_window_h5.csv  — 前後各 5 詞的窗口
+    collocates_倭_window_h10.csv — 前後各 10 詞的窗口
+    collocates_倭_sentence.csv   — 同句搭配
+    results.html                — 可互動的五頁英文分析報告
+    kwic.html                   — 指定搭配詞於不同語境跨度的 KWIC concordance
+"""
+
+import csv
+import html
+import json
+import os
+import random
+import re
+import unicodedata
+
+import jieba
+import opencc
+import pandas as pd
+from qhchina import LineSentenceFile, load_stopwords
+from qhchina.analytics.collocations import find_collocates, kwic
+
+SRC = 'data/明史.txt'
+DATA_TXT = 'data/data.txt'
+INDEX_CSV = 'data/index.csv'
+CORPUS = 'data/segmented.txt'
+USERDICT = 'data/userdict.txt'
+OUTDIR = 'output'
+TARGET = '倭'
+MIN_WORDS = 5
+N_SAMPLES = 20
+SEED = 42
+SAMPLE_TARGET = '倭'
+MIN_WORD_LENGTH = 2
+ADJUSTED_P_THRESHOLD = 0.05
+MAX_COLLOCATES = 20
+HTML_OUT = os.path.join(OUTDIR, 'results.html')
+KWIC_HTML_OUT = os.path.join(OUTDIR, 'kwic.html')
+KWIC_COLLOCATES = ['朝鲜', '登岸', '沈惟敬', '秀吉']
+KWIC_LIMIT = 10
+
+SENT_END = re.compile(r'([。！？；]」?)')
+JUAN_RE = re.compile(r'^卷[一二三四五六七八九十百〇零]+$')
+CITE_RE = re.compile(r'\[\d+\]')
+
+CN_DIGITS = {'零': 0, '〇': 0, '一': 1, '二': 2, '三': 3, '四': 4,
+             '五': 5, '六': 6, '七': 7, '八': 8, '九': 9}
+
+RUNS = [
+    {
+        'method': 'window',
+        'horizon': 5,
+        'label': '5-Word Analysis',
+        'key': 'window_h5',
+        'filename': f'collocates_{TARGET}_window_h5.csv',
+    },
+    {
+        'method': 'window',
+        'horizon': 10,
+        'label': '10-Word Analysis',
+        'key': 'window_h10',
+        'filename': f'collocates_{TARGET}_window_h10.csv',
+    },
+    {
+        'method': 'sentence',
+        'horizon': None,
+        'label': 'Sentence Analysis',
+        'key': 'sentence',
+        'filename': f'collocates_{TARGET}_sentence.csv',
+    },
+]
+
+
+def cn2num(s: str) -> int:
+    """Convert Chinese numerals used in juan headings to Arabic numbers."""
+    s = s.replace('零', '〇')
+    total = 0
+    if '百' in s:
+        head, rest = s.split('百', 1)
+        total += CN_DIGITS[head] * 100
+    else:
+        rest = s
+    if not rest:
+        return total
+    if '十' in rest:
+        tens, ones = rest.split('十', 1)
+        total += (CN_DIGITS[tens] if tens else 1) * 10
+        if ones:
+            total += CN_DIGITS[ones]
+    else:
+        total += int(''.join(str(CN_DIGITS[c]) for c in rest))
+    return total
+
+
+def is_punct(ch: str) -> bool:
+    return unicodedata.category(ch).startswith(('P', 'Z', 'S'))
+
+
+def tokenize(sent: str) -> list[str]:
+    """Tokenize a sentence and remove punctuation-only tokens."""
+    out = []
+    for word in jieba.lcut(sent):
+        word = word.strip()
+        while word and is_punct(word[0]):
+            word = word[1:]
+        while word and is_punct(word[-1]):
+            word = word[:-1]
+        if word and not all(is_punct(char) for char in word):
+            out.append(word)
+    return out
+
+
+def prepare_corpus():
+    converter = opencc.OpenCC('t2s')
+    with open(SRC, encoding='utf-8') as source_file:
+        text = source_file.read()
+
+    records = []
+    current_no, current_title = None, None
+    for line in text.split('\n'):
+        sentence = line.strip()
+        if JUAN_RE.match(sentence):
+            current_no, current_title = cn2num(sentence[1:]), sentence
+            continue
+        if (current_no is None or not sentence
+                or set(sentence) <= {'=', '-'}
+                or sentence.startswith('○')
+                or '公有領域' in sentence):
+            continue
+        sentence = CITE_RE.sub('', sentence)
+        sentence = re.sub(r'\s+', '', sentence)
+        sentence = converter.convert(sentence)
+        if not SENT_END.search(sentence):
+            continue
+        parts = SENT_END.split(sentence)
+        for index in range(1, len(parts), 2):
+            records.append((current_no, current_title, parts[index - 1] + parts[index]))
+        if len(parts) % 2 == 1 and parts[-1]:
+            no, title, last = records[-1]
+            records[-1] = (no, title, last + parts[-1])
+
+    jieba.load_userdict(USERDICT)
+    with open(USERDICT, encoding='utf-8') as userdict_file:
+        targets = [word.strip() for word in userdict_file if word.strip()]
+
+    kept = []
+    for number, (no, title, sentence) in enumerate(records, 1):
+        words = tokenize(sentence)
+        if len(words) >= MIN_WORDS:
+            kept.append((no, title, sentence, words))
+        if number % 50000 == 0:
+            print(f'  已分詞 {number}/{len(records)} 句 …')
+
+    with open(DATA_TXT, 'w', encoding='utf-8') as data_file:
+        for _, _, sentence, _ in kept:
+            data_file.write(sentence + '\n')
+
+    with open(INDEX_CSV, 'w', encoding='utf-8-sig', newline='') as index_file:
+        writer = csv.writer(index_file)
+        writer.writerow(['line_no', 'juan_no', 'juan_title'])
+        for index, (no, title, _, _) in enumerate(kept, 1):
+            writer.writerow([index, no, title])
+
+    with open(CORPUS, 'w', encoding='utf-8') as corpus_file:
+        for _, _, _, words in kept:
+            corpus_file.write(' '.join(words) + '\n')
+
+    if SAMPLE_TARGET:
+        sample_pool = [row for row in kept if SAMPLE_TARGET in row[2]]
+    else:
+        sample_pool = [row for row in kept if any(word in row[2] for word in targets)]
+    target_count = sum(1 for row in kept if TARGET in row[2])
+    print(f'\n語料統計：切出 {len(records)} 句，保留（≥{MIN_WORDS} 詞）{len(kept)} 句，'
+          f'含「{TARGET}」{target_count} 句')
+
+    random.seed(SEED)
+    sample = random.sample(sample_pool, min(N_SAMPLES, len(sample_pool)))
+    print(f'\n=== {len(sample)} 句含「{SAMPLE_TARGET or "目標詞"}」的隨機分詞例句'
+          f'（seed={SEED}）===\n')
+    for no, _, _, words in sample:
+        print(f'[卷{no:>3}] {"/".join(words)}')
+
+
+def build_results_html():
+    datasets = {}
+    for run in RUNS:
+        input_path = os.path.join(OUTDIR, run['filename'])
+        df = pd.read_csv(input_path, encoding='utf-8-sig')
+        datasets[run['key']] = [
+            {
+                key: None if value != value else value.item() if hasattr(value, 'item') else value
+                for key, value in row.items()
+            }
+            for row in df.to_dict(orient='records')
+        ]
+
+    data_json = json.dumps(datasets, ensure_ascii=False, allow_nan=False)
+    data_json = data_json.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+    with open(HTML_OUT, 'w', encoding='utf-8') as html_file:
+        html_file.write(HTML_TEMPLATE.replace('__DATA_JSON__', data_json))
+    print(f'Interactive report → {HTML_OUT}')
+
+
+def build_kwic_html():
+    corpus = LineSentenceFile(CORPUS)
+    with open(DATA_TXT, encoding='utf-8') as data_file:
+        passages = [line.rstrip('\n') for line in data_file]
+
+    index_by_line = {}
+    if os.path.exists(INDEX_CSV):
+        index_df = pd.read_csv(INDEX_CSV, encoding='utf-8-sig')
+        required = {'line_no', 'juan_no', 'juan_title'}
+        missing = required.difference(index_df.columns)
+        if missing:
+            raise ValueError(f'{INDEX_CSV} is missing columns: {", ".join(sorted(missing))}')
+        index_by_line = index_df.set_index('line_no')[['juan_no', 'juan_title']].to_dict('index')
+
+    methods = [
+        ('5-Word', 5),
+        ('10-Word', 10),
+        ('Sentence', corpus.token_count),
+    ]
+    sections = []
+    for method, horizon in methods:
+        matches = kwic(
+            sentences=corpus,
+            target=TARGET,
+            horizon=horizon,
+            sort_by='position',
+            separator='',
+            return_type='dataframe',
+            max_sentence_length=None,
+        )
+        for collocate in KWIC_COLLOCATES:
+            rows = []
+            seen_passages = set()
+            for result in matches.to_dict(orient='records'):
+                doc_index = int(result['doc_index'])
+                context_tokens = result['left_tokens'] + result['right_tokens']
+                if collocate not in context_tokens or doc_index in seen_passages:
+                    continue
+                seen_passages.add(doc_index)
+                passage = passages[doc_index]
+                metadata = index_by_line.get(doc_index + 1, {})
+                rows.append({
+                    'juan_no': metadata.get('juan_no'),
+                    'juan_title': metadata.get('juan_title'),
+                    'left': result['left'],
+                    'node': result['node'],
+                    'right': result['right'],
+                    'passage': passage,
+                    'target_count': passage.count(TARGET),
+                    'collocate_count': passage.count(collocate),
+                })
+                if len(rows) >= KWIC_LIMIT:
+                    break
+
+            table_rows = []
+            for row in rows:
+                volume_cells = ''
+                if index_by_line:
+                    volume = '' if pd.isna(row['juan_no']) else f"卷{int(row['juan_no'])}"
+                    title = '' if pd.isna(row['juan_title']) else row['juan_title']
+                    volume_cells = (
+                        f'<td>{html.escape(volume)}</td>'
+                        f'<td>{html.escape(str(title))}</td>'
+                    )
+                table_rows.append(
+                    '<tr>'
+                    f'{volume_cells}'
+                    f'<td class="context">{html.escape(row["left"])}</td>'
+                    f'<td class="node">{html.escape(row["node"])}</td>'
+                    f'<td class="context">{html.escape(row["right"])}</td>'
+                    f'<td class="passage">{html.escape(row["passage"])}</td>'
+                    f'<td>{row["target_count"]}</td>'
+                    f'<td>{row["collocate_count"]}</td>'
+                    '</tr>'
+                )
+
+            volume_headers = '<th>卷</th><th>Title</th>' if index_by_line else ''
+            if table_rows:
+                table = (
+                    '<div class="table-wrap"><table><thead><tr>'
+                    f'{volume_headers}<th>Left context</th><th>Node</th><th>Right context</th>'
+                    '<th>Passage</th><th>倭 count</th><th>Collocate count</th>'
+                    '</tr></thead><tbody>'
+                    + ''.join(table_rows)
+                    + '</tbody></table></div>'
+                )
+            else:
+                table = '<p class="empty">No passages contain both 倭 and this collocate in this context.</p>'
+            sections.append(
+                f'<section class="collocate"><h3>{html.escape(collocate)}</h3>'
+                f'<p class="muted">{len(rows)} passage(s), up to {KWIC_LIMIT}; '
+                'counts refer to the complete sentence.</p>'
+                f'{table}</section>'
+            )
+
+        method_sections = sections[-len(KWIC_COLLOCATES):]
+        sections[-len(KWIC_COLLOCATES):] = [
+            f'<section class="method" id="{method.lower().replace("-", "")}">'
+            f'<h2>{html.escape(method)} horizon</h2>'
+            + ''.join(method_sections)
+            + '</section>'
+        ]
+
+    index_metadata = (
+        'Volume number and title are taken from data/index.csv.'
+        if index_by_line else
+        'data/index.csv was not found; volume metadata is omitted.'
+    )
+    html_document = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KWIC: Collocation Analysis of “倭” Represent throughout Ming Shi 明史</title>
+<style>
+:root{{--ink:#17232e;--muted:#5c6c78;--blue:#173f5f;--teal:#207c78;--paper:#f3f5f5;--line:#dce3e5}}
+*{{box-sizing:border-box}}
+body{{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}}
+header{{min-height:65vh;padding:clamp(28px,8vw,100px);display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,#fff 35%,#e5f1ef)}}
+.eyebrow{{color:var(--teal);font-weight:700;text-transform:uppercase;letter-spacing:.12em}}
+h1,h2,h3{{font-family:Georgia,"Noto Serif",serif}}
+h1{{font-size:clamp(2.2rem,5.6vw,4.8rem);line-height:1.08;max-width:1000px}}
+h2{{font-size:2rem;border-bottom:2px solid var(--teal);padding-bottom:8px}}
+h3{{font-size:1.5rem;color:var(--blue)}}
+main{{max-width:1500px;margin:24px auto;padding:0 24px 50px}}
+.method,.collocate{{background:white;border:1px solid var(--line);border-radius:10px;padding:24px;margin:20px 0}}
+.table-wrap{{overflow:auto;border:1px solid var(--line);border-radius:7px}}
+table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}
+th,td{{padding:9px 11px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}}
+th{{background:#eef3f4;white-space:nowrap}}
+.context{{white-space:nowrap;max-width:300px;overflow-wrap:anywhere}}
+.node{{font-weight:700;color:#9c3f2b}}
+.passage{{min-width:300px;white-space:normal}}
+.muted,.empty{{color:var(--muted)}}
+@media print{{body{{background:white}}main{{max-width:none;margin:0}}header{{min-height:0;page-break-after:always}}.method{{page-break-before:always}}}}
+</style>
+</head>
+<body>
+<header>
+<div class="eyebrow">Keywords in Context · 明史</div>
+<h1>KWIC: Collocation Analysis of “倭” Represent throughout Ming Shi 明史</h1>
+<p>Concordance passages for 倭 and 朝鲜, 登岸, 沈惟敬, 秀吉, within 5-word, 10-word, and sentence horizons.</p>
+<p class="muted">{html.escape(index_metadata)} Each row reports the counts of 倭 and the selected collocate in its full sentence.</p>
+</header>
+<main>{''.join(sections)}</main>
+</body>
+</html>
+"""
+    with open(KWIC_HTML_OUT, 'w', encoding='utf-8') as html_file:
+        html_file.write(html_document)
+    print(f'KWIC report → {KWIC_HTML_OUT}')
+
+
+def main():
+    os.makedirs(OUTDIR, exist_ok=True)
+    prepare_corpus()
+    corpus = LineSentenceFile(CORPUS)   # 可重啟迭代器（find_collocates 需迭代兩次）
+    print(f'語料：{corpus.sentence_count:,} 句，{corpus.token_count:,} 詞\n')
+
+    stopwords = load_stopwords('zh_cl_sim')
+    for run in RUNS:
+        method, horizon, label = run['method'], run['horizon'], run['key']
+        df = find_collocates(
+            sentences=corpus,
+            target_words=[TARGET],
+            method=method,
+            horizon=horizon,
+            measures=['log_likelihood', 'logDice'],
+            filters={
+                'stopwords': stopwords,
+                'min_word_length': MIN_WORD_LENGTH,
+                'max_adjusted_p': ADJUSTED_P_THRESHOLD,
+            },
+            correction='fdr_bh',
+            sort_by='log_dice',
+            ascending=False,
+            return_type='dataframe',
+        )
+        if 'adjusted_p_value' in df.columns:
+            df = df.loc[df['adjusted_p_value'] < ADJUSTED_P_THRESHOLD]
+            df = df.sort_values('log_dice', ascending=False, kind='mergesort')
+        df = df.head(MAX_COLLOCATES).copy()
+
+        output_path = os.path.join(OUTDIR, f'collocates_{TARGET}_{label}.csv')
+        df.to_csv(output_path, index=False, encoding='utf-8-sig')
+        print(f'搭配詞結果（{label}）→ {output_path}（{len(df)} 列）')
+        print(df.to_string(index=False))
+        print()
+
+    build_results_html()
+    build_kwic_html()
+
+
+HTML_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collocation Analysis of “倭” — Ming Shi 明史</title>
+<style>
+:root{color-scheme:light;--ink:#17232e;--muted:#5c6c78;--blue:#173f5f;--teal:#207c78;--paper:#f3f5f5;--line:#dce3e5;--white:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+.topbar{position:sticky;top:0;z-index:5;background:var(--blue);color:white;box-shadow:0 3px 12px #10253630}
+.topbar-inner{max-width:1440px;margin:auto;padding:12px 24px;display:flex;align-items:center;gap:18px}
+.brand{font-weight:700;white-space:nowrap;margin-right:auto}
+.nav{display:flex;gap:7px;flex-wrap:wrap}
+button,select,input{font:inherit}
+.nav button,.pager button{border:1px solid #ffffff66;background:transparent;color:white;border-radius:6px;padding:8px 11px;cursor:pointer}
+.nav button:hover,.nav button.active{background:white;color:var(--blue)}
+main{max-width:1440px;margin:28px auto;padding:0 24px 36px}
+.page{display:none;min-height:70vh;background:var(--white);border:1px solid var(--line);border-radius:12px;padding:clamp(24px,5vw,64px);box-shadow:0 8px 30px #1025360b}
+.page.active{display:block}
+.cover{min-height:70vh;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,#fff 35%,#e5f1ef)}
+.eyebrow{color:var(--teal);font-weight:700;text-transform:uppercase;letter-spacing:.12em;font-size:.82rem}
+h1{font-family:Georgia,"Noto Serif",serif;font-size:clamp(2.2rem,5.6vw,4.8rem);line-height:1.08;max-width:1000px;margin:.5em 0}
+h2{font-family:Georgia,"Noto Serif",serif;font-size:clamp(1.7rem,3vw,2.5rem);margin:0 0 8px}
+h3{margin:.3em 0}
+.subtitle,.muted{color:var(--muted)}
+.lead{font-size:1.2rem;max-width:760px;color:#40535f}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:26px 0}
+.card{border:1px solid var(--line);border-radius:9px;padding:16px;background:#fbfcfc}
+.card strong{display:block;color:var(--blue);font-size:1.2rem;margin-top:5px}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:22px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:10px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{background:#eef3f4;color:#273d4b;position:sticky;top:0}
+th:first-child,td:first-child{text-align:left}
+th button{border:0;background:transparent;color:inherit;font-weight:700;padding:2px;cursor:pointer}
+th button:hover{color:var(--teal);text-decoration:underline}
+tbody tr:hover{background:#f0f8f7}
+.toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:20px 0 4px}
+.toolbar label{font-weight:650}
+select,input{border:1px solid #b9c6cb;border-radius:6px;padding:9px 11px;background:white;color:var(--ink)}
+input{min-width:min(300px,100%)}
+.pager{display:flex;justify-content:space-between;gap:12px;margin-top:18px}
+.pager button{background:var(--blue)}
+.pager button:disabled{opacity:.45;cursor:not-allowed}
+.note{padding:14px 17px;border-radius:7px;background:#edf5f4;color:#28434b}
+.page-number{color:var(--muted);margin-top:14px;font-size:.9rem}
+@media(max-width:850px){.topbar-inner{align-items:flex-start;flex-direction:column;gap:10px}.brand{margin:0}.nav{max-height:130px;overflow:auto}}
+@media print{.topbar,.pager{display:none!important}body{background:white}main{max-width:none;margin:0;padding:0}.page{display:block!important;min-height:0;box-shadow:none;border:0;page-break-after:always;padding:24px}.table-wrap{overflow:visible}th{position:static}}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+<div class="brand">Ming Shi 明史 · Collocation Study</div>
+<nav class="nav" aria-label="Report pages">
+<button data-page="0">1 · Cover</button><button data-page="1">2 · 5-Word</button>
+<button data-page="2">3 · 10-Word</button><button data-page="3">4 · Sentence</button>
+<button data-page="4">5 · Compare</button>
+</nav></div></header>
+<main>
+<section class="page cover" id="page-1">
+<div class="eyebrow">Historical Corpus Linguistics · Interactive Report</div>
+<h1>Collocation Analysis of “倭” Represent throughout Ming Shi 明史</h1>
+<p class="lead">A comparison of words associated with 倭 in the Ming Shi, using two word-window sizes and whole-sentence context.</p>
+<div class="cards" id="overview-cards"></div>
+<p class="note">Use the navigation bar above to open each analysis. Click any table heading to reorder its results; page 5 lets you compare scores across all three methods.</p>
+<div class="page-number">Page 1 of 5</div>
+</section>
+<section class="page" id="page-2">
+<div class="eyebrow">Window method · horizon = 5</div><h2>5-Word Analysis</h2>
+<p class="subtitle">Collocates within five tokens to either side of 倭. All reported results pass the adjusted p-value threshold.</p>
+<div class="cards" id="stats-window_h5"></div><div class="table-wrap" id="table-window_h5"></div><div class="page-number">Page 2 of 5</div>
+</section>
+<section class="page" id="page-3">
+<div class="eyebrow">Window method · horizon = 10</div><h2>10-Word Analysis</h2>
+<p class="subtitle">Collocates within ten tokens to either side of 倭. All reported results pass the adjusted p-value threshold.</p>
+<div class="cards" id="stats-window_h10"></div><div class="table-wrap" id="table-window_h10"></div><div class="page-number">Page 3 of 5</div>
+</section>
+<section class="page" id="page-4">
+<div class="eyebrow">Sentence method</div><h2>Sentence Analysis</h2>
+<p class="subtitle">Collocates occurring in the same sentence as 倭. All reported results pass the adjusted p-value threshold.</p>
+<div class="cards" id="stats-sentence"></div><div class="table-wrap" id="table-sentence"></div><div class="page-number">Page 4 of 5</div>
+</section>
+<section class="page" id="page-5">
+<div class="eyebrow">Cross-method comparison</div><h2>Compare the Three Analyses</h2>
+<p class="subtitle">Choose a measure to compare its score and within-run rank for every collocate across 5-word, 10-word, and sentence contexts.</p>
+<div class="toolbar"><label for="metric-choice">Measure</label><select id="metric-choice"><option value="log_dice">logDice</option><option value="log_likelihood">Log-likelihood</option></select>
+<label for="compare-search">Find a collocate</label><input id="compare-search" type="search" placeholder="Type a word to filter"></div>
+<div class="table-wrap" id="comparison-table"></div>
+<div class="page-number">Page 5 of 5</div>
+</section>
+<div class="pager"><button id="previous-page">← Previous page</button><button id="next-page">Next page →</button></div>
+</main>
+<script id="analysis-data" type="application/json">__DATA_JSON__</script>
+<script>
+const datasets=JSON.parse(document.getElementById('analysis-data').textContent);
+const runInfo=[
+  {key:'window_h5',label:'5-Word Analysis'},
+  {key:'window_h10',label:'10-Word Analysis'},
+  {key:'sentence',label:'Sentence Analysis'}
+];
+const columns=[
+  ['collocate','Collocate','text'],['obs_local','Observed local','number'],
+  ['exp_local','Expected local','number'],['obs_global','Observed global','number'],
+  ['ratio_local','Local ratio','number'],['log_likelihood','Log-likelihood','number'],
+  ['log_dice','logDice','number'],['p_value','p-value','number'],
+  ['adjusted_p_value','Adjusted p-value','number']
+];
+const pageButtons=[...document.querySelectorAll('.nav button')];
+let activePage=0;
+function setPage(index,updateHash=true){
+  activePage=Math.max(0,Math.min(4,index));
+  document.querySelectorAll('.page').forEach((page,i)=>page.classList.toggle('active',i===activePage));
+  pageButtons.forEach((button,i)=>button.classList.toggle('active',i===activePage));
+  document.getElementById('previous-page').disabled=activePage===0;
+  document.getElementById('next-page').disabled=activePage===4;
+  if(updateHash)history.replaceState(null,'','#page-'+(activePage+1));
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+pageButtons.forEach((button)=>button.addEventListener('click',()=>setPage(Number(button.dataset.page))));
+document.getElementById('previous-page').addEventListener('click',()=>setPage(activePage-1));
+document.getElementById('next-page').addEventListener('click',()=>setPage(activePage+1));
+function formatValue(value,key){
+  if(value===null||value===undefined)return '—';
+  if(key==='p_value'||key==='adjusted_p_value')return value===0?'< 1e-300':value<.001?value.toExponential(3):value.toFixed(4);
+  if(typeof value==='number')return Number(value.toFixed(4)).toString();
+  return String(value);
+}
+function cell(row,key){const td=document.createElement('td');td.textContent=formatValue(row[key],key);return td}
+function makeSortableTable(container,rows,tableColumns,initialKey,initialAscending,onSort=null){
+  let sortKey=initialKey,ascending=initialAscending;
+  const draw=()=>{
+    const sorted=[...rows].sort((a,b)=>{
+      const left=a[sortKey],right=b[sortKey];
+      if((left===null||left===undefined)&&(right===null||right===undefined))return 0;
+      if(left===null||left===undefined)return 1;
+      if(right===null||right===undefined)return -1;
+      const comparison=typeof left==='string'?left.localeCompare(right):left-right;
+      return comparison===0?0:(ascending?comparison:-comparison);
+    });
+    const table=document.createElement('table'),thead=table.createTHead(),header=thead.insertRow();
+    tableColumns.forEach(([key,label])=>{
+      const th=document.createElement('th'),button=document.createElement('button');
+      button.type='button';button.textContent=label+(key===sortKey?(ascending?' ↑':' ↓'):'');
+      button.addEventListener('click',()=>{
+        if(onSort){onSort(key);return}
+        if(sortKey===key)ascending=!ascending;else{sortKey=key;ascending=key==='collocate'}draw()
+      });
+      th.append(button);header.append(th);
+    });
+    const body=table.createTBody();
+    sorted.forEach(row=>{const tr=body.insertRow();tableColumns.forEach(([key])=>tr.append(cell(row,key)))});
+    container.replaceChildren(table);
+  };
+  draw();
+}
+function renderRun(key){
+  const rows=datasets[key];
+  const ranked=[...rows].sort((a,b)=>b.log_dice-a.log_dice);
+  const best=ranked[0];
+  const cards=[
+    ['Significant collocates',rows.length.toLocaleString()],
+    ['Highest logDice',best?best.collocate+' · '+formatValue(best.log_dice,'log_dice'):'—'],
+    ['Adjusted p-value criterion','FDR-adjusted p < 0.05']
+  ];
+  const container=document.getElementById('stats-'+key);
+  container.replaceChildren(...cards.map(([label,value])=>{
+    const card=document.createElement('div'),heading=document.createElement('strong');
+    card.className='card';card.append(document.createTextNode(label));heading.textContent=value;card.append(heading);return card;
+  }));
+  makeSortableTable(document.getElementById('table-'+key),rows,columns,'log_dice',false);
+}
+runInfo.forEach(run=>renderRun(run.key));
+document.getElementById('overview-cards').innerHTML=runInfo.map(run=>
+  '<div class="card">'+run.label+'<strong>'+datasets[run.key].length.toLocaleString()+' significant collocates</strong></div>'
+).join('');
+const metricChoice=document.getElementById('metric-choice'),searchInput=document.getElementById('compare-search');
+let comparisonSortKey='rank-window_h5',comparisonAscending=true;
+function renderComparison(){
+  const metric=metricChoice.value;
+  const indexed=runInfo.map(run=>{
+    const ranked=[...datasets[run.key]].sort((a,b)=>b[metric]-a[metric]);
+    const map=new Map(ranked.map((row,index)=>[row.collocate,{score:row[metric],rank:index+1}]));
+    return {run,map};
+  });
+  const words=[...new Set(indexed.flatMap(item=>[...item.map.keys()]))];
+  const query=searchInput.value.trim().toLocaleLowerCase();
+  const rows=words.filter(word=>word.toLocaleLowerCase().includes(query)).map(word=>{
+    const row={collocate:word};
+    indexed.forEach(({run,map})=>{
+      const entry=map.get(word);
+      row['score-'+run.key]=entry?entry.score:null;
+      row['rank-'+run.key]=entry?entry.rank:null;
+    });
+    return row;
+  });
+  const compareColumns=[['collocate','Collocate','text']];
+  runInfo.forEach(run=>{
+    compareColumns.push(['score-'+run.key,run.label+' score ('+(metric==='log_dice'?'logDice':'log-likelihood')+')','number']);
+    compareColumns.push(['rank-'+run.key,run.label+' rank','number']);
+  });
+  makeSortableTable(document.getElementById('comparison-table'),rows,compareColumns,comparisonSortKey,comparisonAscending,key=>{
+    if(comparisonSortKey===key)comparisonAscending=!comparisonAscending;
+    else{comparisonSortKey=key;comparisonAscending=key==='collocate'}
+    renderComparison();
+  });
+}
+metricChoice.addEventListener('change',()=>{comparisonSortKey='rank-window_h5';comparisonAscending=true;renderComparison()});
+searchInput.addEventListener('input',renderComparison);
+renderComparison();
+const hashMatch=location.hash.match(/^#page-([1-5])$/);
+setPage(hashMatch?Number(hashMatch[1])-1:0,false);
+</script>
+</body>
+</html>
+"""
+
+
+if __name__ == '__main__':
+    main()

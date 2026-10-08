@@ -1,0 +1,5 @@
+# Python 3.10+
+opencc>=1.4        # Traditional-to-simplified Chinese conversion
+jieba>=0.42.1      # Chinese tokenization
+qhchina>=0.2.7     # Collocation statistics and classical Chinese stopwords
+pandas>=2.0        # Read/write collocation result tables

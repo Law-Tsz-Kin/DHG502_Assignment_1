@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^git status --short && printf '\\\\nRoot files:\\\\n' && git --no-pager ls-files$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
