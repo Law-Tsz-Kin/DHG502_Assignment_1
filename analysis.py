@@ -325,16 +325,15 @@ def build_collocation_tables(datasets):
             rank + 1 if significant_row is not None else '—',
             significant_row['collocate'] if significant_row is not None else '—',
             f"{significant_row['log_likelihood']:.3f}" if significant_row is not None else '—',
-            f"{significant_row['adjusted_p_value']:.2e}" if significant_row is not None else '—',
             rank + 1 if strength_row is not None else '—',
             strength_row['collocate'] if strength_row is not None else '—',
             f"{strength_row['log_dice']:.3f}" if strength_row is not None else '—',
         ])
     render_table_image(
         'Table 1. Top 10 Collocates in the 5-Word Window',
-        'Significance ranked by log-likelihood (FDR-adjusted p shown); strength ranked by logDice.',
+        'Significance ranked by log-likelihood; strength ranked by logDice.',
         [
-            'Significance rank', 'Collocate', 'Log-likelihood', 'Adjusted p',
+            'Significance rank', 'Collocate', 'Log-likelihood',
             'Strength rank', 'Collocate', 'logDice',
         ],
         comparison,
