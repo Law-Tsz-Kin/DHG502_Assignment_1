@@ -11,6 +11,8 @@ analysis.py — 《明史》「倭」字搭配（collocation）分析
     collocates_倭_sentence.csv   — 同句搭配
     results.html                — 可互動的五頁英文分析報告
     kwic.html                   — 指定搭配詞於不同語境跨度的 KWIC concordance
+    table1_significance_vs_strength_5word.png
+    table2_top_collocates_comparison.png
 """
 
 import csv
@@ -22,6 +24,12 @@ import re
 import unicodedata
 
 import jieba
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
+from matplotlib.ft2font import FT2Font
+import mplfonts
 import opencc
 import pandas as pd
 from qhchina import LineSentenceFile, load_stopwords
@@ -43,8 +51,11 @@ ADJUSTED_P_THRESHOLD = 0.05
 MAX_COLLOCATES = 20
 HTML_OUT = os.path.join(OUTDIR, 'results.html')
 KWIC_HTML_OUT = os.path.join(OUTDIR, 'kwic.html')
+TABLE1_OUT = os.path.join(OUTDIR, 'table1_significance_vs_strength_5word.png')
+TABLE2_OUT = os.path.join(OUTDIR, 'table2_top_collocates_comparison.png')
 KWIC_COLLOCATES = ['朝鲜', '登岸', '沈惟敬', '秀吉']
 KWIC_LIMIT = 10
+TABLE_TOP_N = 10
 
 SENT_END = re.compile(r'([。！？；]」?)')
 JUAN_RE = re.compile(r'^卷[一二三四五六七八九十百〇零]+$')
@@ -208,6 +219,154 @@ def build_results_html():
     print(f'Interactive report → {HTML_OUT}')
 
 
+def configure_table_font(datasets):
+    """Use the bundled Simplified Chinese font and verify required glyph coverage."""
+    required_chars = set('倭显著性强度搭配词校正方法排名分数')
+    for df in datasets.values():
+        if 'collocate' in df:
+            required_chars.update(''.join(df['collocate'].astype(str)))
+
+    font_path = os.path.join(
+        os.path.dirname(mplfonts.__file__),
+        'fonts',
+        'NotoSansCJKsc-Regular.otf',
+    )
+    charmap = FT2Font(font_path).get_charmap()
+    missing_chars = sorted(char for char in required_chars if ord(char) not in charmap)
+    if missing_chars:
+        raise RuntimeError(f'The bundled CJK font is missing glyphs: {"".join(missing_chars)}')
+    font_manager.fontManager.addfont(font_path)
+    matplotlib.rcParams['font.family'] = font_manager.FontProperties(
+        fname=font_path,
+    ).get_name()
+
+
+def render_table_image(title, subtitle, columns, rows, output_path, *, row_height=0.42):
+    """Render a titled, styled table as a standalone PNG."""
+    width = max(11, len(columns) * 1.7)
+    height = 1.8 + max(1, len(rows)) * row_height
+    figure, axis = plt.subplots(figsize=(width, height))
+    figure.patch.set_facecolor('#f3f5f5')
+    axis.set_facecolor('#f3f5f5')
+    axis.axis('off')
+    axis.text(
+        0.01, 1.04, title, transform=axis.transAxes,
+        fontsize=17, color='#173f5f', va='bottom',
+    )
+    axis.text(
+        0.01, 1.005, subtitle, transform=axis.transAxes,
+        fontsize=10, color='#5c6c78', va='bottom',
+    )
+    table = axis.table(
+        cellText=rows,
+        colLabels=columns,
+        cellLoc='center',
+        colLoc='center',
+        loc='upper center',
+        bbox=[0, 0, 1, 0.94],
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    for (row_index, _), cell in table.get_celld().items():
+        cell.set_edgecolor('#dce3e5')
+        if row_index == 0:
+            cell.set_facecolor('#173f5f')
+            cell.set_text_props(color='white')
+        else:
+            cell.set_facecolor('#ffffff' if row_index % 2 else '#edf3f4')
+            cell.set_text_props(color='#17232e')
+    figure.savefig(output_path, dpi=220, bbox_inches='tight', facecolor=figure.get_facecolor())
+    plt.close(figure)
+    print(f'PNG table → {output_path}')
+
+
+def build_collocation_tables(datasets):
+    """Create top-10 significance/strength and cross-method comparison tables."""
+    configure_table_font(datasets)
+    five_word = datasets['window_h5']
+    significance = five_word.sort_values(
+        ['log_likelihood', 'collocate'],
+        ascending=[False, True],
+        kind='mergesort',
+    ).head(TABLE_TOP_N).reset_index(drop=True)
+    strength = five_word.sort_values(
+        ['log_dice', 'collocate'],
+        ascending=[False, True],
+        kind='mergesort',
+    ).head(TABLE_TOP_N).reset_index(drop=True)
+
+    comparison = []
+    for rank in range(TABLE_TOP_N):
+        significant_row = significance.iloc[rank] if rank < len(significance) else None
+        strength_row = strength.iloc[rank] if rank < len(strength) else None
+        comparison.append([
+            rank + 1 if significant_row is not None else '—',
+            significant_row['collocate'] if significant_row is not None else '—',
+            f"{significant_row['log_likelihood']:.3f}" if significant_row is not None else '—',
+            f"{significant_row['adjusted_p_value']:.2e}" if significant_row is not None else '—',
+            rank + 1 if strength_row is not None else '—',
+            strength_row['collocate'] if strength_row is not None else '—',
+            f"{strength_row['log_dice']:.3f}" if strength_row is not None else '—',
+        ])
+    render_table_image(
+        'Table 1. Top 10 Collocates in the 5-Word Window',
+        'Significance ranked by log-likelihood (FDR-adjusted p shown); strength ranked by logDice.',
+        [
+            'Significance rank', 'Collocate', 'Log-likelihood', 'Adjusted p',
+            'Strength rank', 'Collocate', 'logDice',
+        ],
+        comparison,
+        TABLE1_OUT,
+    )
+
+    run_keys = ('window_h5', 'window_h10', 'sentence')
+    run_labels = ('5-Word', '10-Word', 'Sentence')
+    ranked_runs = {
+        key: datasets[key].sort_values(
+            ['log_dice', 'collocate'],
+            ascending=[False, True],
+            kind='mergesort',
+        ).head(TABLE_TOP_N).reset_index(drop=True)
+        for key in run_keys
+    }
+    union = {}
+    for key, label in zip(run_keys, run_labels):
+        for rank, row in ranked_runs[key].iterrows():
+            entry = union.setdefault(row['collocate'], {})
+            entry[key] = (rank + 1, row['log_dice'])
+    ordered_collocates = sorted(
+        union,
+        key=lambda word: (
+            min(rank for rank, _ in union[word].values()),
+            sum(rank for rank, _ in union[word].values()),
+            word,
+        ),
+    )
+    cross_method_rows = []
+    for word in ordered_collocates:
+        row = [word]
+        for key in run_keys:
+            rank_and_score = union[word].get(key)
+            if rank_and_score is None:
+                row.extend(['—', '—'])
+            else:
+                rank, score = rank_and_score
+                row.extend([rank, f'{score:.3f}'])
+        cross_method_rows.append(row)
+    render_table_image(
+        'Table 2. Top Collocates Across Context Methods',
+        'Union of each method’s top 10 collocates ranked by logDice; — means not in that method’s top 10.',
+        [
+            'Collocate',
+            '5-Word rank', '5-Word logDice',
+            '10-Word rank', '10-Word logDice',
+            'Sentence rank', 'Sentence logDice',
+        ],
+        cross_method_rows,
+        TABLE2_OUT,
+    )
+
+
 def build_kwic_html():
     corpus = LineSentenceFile(CORPUS)
     with open(DATA_TXT, encoding='utf-8') as data_file:
@@ -368,6 +527,7 @@ def main():
     print(f'語料：{corpus.sentence_count:,} 句，{corpus.token_count:,} 詞\n')
 
     stopwords = load_stopwords('zh_cl_sim')
+    table_datasets = {}
     for run in RUNS:
         method, horizon, label = run['method'], run['horizon'], run['key']
         df = find_collocates(
@@ -389,6 +549,7 @@ def main():
         if 'adjusted_p_value' in df.columns:
             df = df.loc[df['adjusted_p_value'] < ADJUSTED_P_THRESHOLD]
             df = df.sort_values('log_dice', ascending=False, kind='mergesort')
+        table_datasets[run['key']] = df.copy()
         df = df.head(MAX_COLLOCATES).copy()
 
         output_path = os.path.join(OUTDIR, f'collocates_{TARGET}_{label}.csv')
@@ -397,6 +558,7 @@ def main():
         print(df.to_string(index=False))
         print()
 
+    build_collocation_tables(table_datasets)
     build_results_html()
     build_kwic_html()
 
