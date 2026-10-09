@@ -9,9 +9,9 @@ analysis.py — 《明史》「倭」字搭配（collocation）分析
     collocates_倭_window_h5.csv  — 前後各 5 詞的窗口
     collocates_倭_window_h10.csv — 前後各 10 詞的窗口
     collocates_倭_sentence.csv   — 同句搭配
-    kwic.csv                    — 五詞窗口 KWIC concordance
+    kwic.csv                    — 十詞窗口 KWIC concordance
     results.html                — 可互動的五頁英文分析報告
-    kwic.html                   — 五詞窗口 KWIC concordance
+    kwic.html                   — 十詞窗口 KWIC concordance
     table1_significance_vs_strength_5word.png
     table2_top_collocates_comparison.png
 """
@@ -55,7 +55,7 @@ KWIC_HTML_OUT = os.path.join(OUTDIR, 'kwic.html')
 KWIC_CSV_OUT = os.path.join(OUTDIR, 'kwic.csv')
 TABLE1_OUT = os.path.join(OUTDIR, 'table1_significance_vs_strength_5word.png')
 TABLE2_OUT = os.path.join(OUTDIR, 'table2_top_collocates_comparison.png')
-KWIC_COLLOCATES = ['海上', '入寇', '朝鲜', '新']
+KWIC_COLLOCATES = ['王京', '新']
 KWIC_LIMIT = 10
 TABLE_TOP_N = 10
 MISSING_TABLE_GLYPHS = set()
@@ -413,7 +413,7 @@ def build_kwic_html():
             raise ValueError(f'{INDEX_CSV} is missing columns: {", ".join(sorted(missing))}')
         index_by_line = index_df.set_index('line_no')[['juan_no', 'juan_title']].to_dict('index')
 
-    methods = [('5-Word', 5)]
+    methods = [('10-Word', 10)]
     sections = []
     csv_rows = []
     for method, horizon in methods:
@@ -465,10 +465,10 @@ def build_kwic_html():
                 table_rows.append(
                     '<tr>'
                     f'{volume_cells}'
-                    f'<td class="context">{html.escape(row["left"])}</td>'
-                    f'<td class="node">{html.escape(row["node"])}</td>'
-                    f'<td class="context">{html.escape(row["right"])}</td>'
-                    f'<td class="passage">{html.escape(row["passage"])}</td>'
+                    f'<td class="context">{highlight_kwic_text(row["left"], collocate)}</td>'
+                    f'<td class="node">{highlight_kwic_text(row["node"], collocate)}</td>'
+                    f'<td class="context">{highlight_kwic_text(row["right"], collocate)}</td>'
+                    f'<td class="passage">{highlight_kwic_text(row["passage"], collocate)}</td>'
                     f'<td>{row["target_count"]}</td>'
                     f'<td>{row["collocate_count"]}</td>'
                     '</tr>'
@@ -505,7 +505,7 @@ def build_kwic_html():
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>KWIC: Collocation Analysis of “倭” Represent throughout Ming Shi 明史</title>
 <style>
-:root{{--ink:#17232e;--muted:#5c6c78;--blue:#173f5f;--teal:#207c78;--paper:#f3f5f5;--line:#dce3e5}}
+:root{{--ink:#17232e;--muted:#5c6c78;--blue:#173f5f;--teal:#207c78;--paper:#f3f5f5;--line:#dce3e5;--target-bg:#ffe29a;--target-ink:#633f00;--collocate-bg:#b9e7e2;--collocate-ink:#114b48}}
 *{{box-sizing:border-box}}
 body{{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}}
 header{{min-height:65vh;padding:clamp(28px,8vw,100px);display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,#fff 35%,#e5f1ef)}}
@@ -521,8 +521,11 @@ table{{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}}
 th,td{{padding:9px 11px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}}
 th{{background:#eef3f4;white-space:nowrap}}
 .context{{white-space:nowrap;max-width:300px;overflow-wrap:anywhere}}
-.node{{font-weight:700;color:#9c3f2b}}
+.node{{font-weight:700}}
 .passage{{min-width:300px;white-space:normal}}
+mark{{border-radius:3px;padding:0 2px;font-weight:700}}
+.kwic-target{{background:var(--target-bg);color:var(--target-ink)}}
+.kwic-collocate{{background:var(--collocate-bg);color:var(--collocate-ink)}}
 .muted,.empty{{color:var(--muted)}}
 @media print{{body{{background:white}}main{{max-width:none;margin:0}}header{{min-height:0;page-break-after:always}}.method{{page-break-before:always}}}}
 </style>
@@ -531,8 +534,9 @@ th{{background:#eef3f4;white-space:nowrap}}
 <header>
 <div class="eyebrow">Keywords in Context · 明史</div>
 <h1>KWIC: Collocation Analysis of “倭” Represent throughout Ming Shi 明史</h1>
-<p>5-word-window concordance passages for 倭 and 朝鲜, 新, 移西, 沈惟敬, 秀吉.</p>
+<p>10-word-window concordance passages for 倭 and 王京, 新.</p>
 <p class="muted">{html.escape(index_metadata)} Each row reports the counts of 倭 and the selected collocate in its full sentence.</p>
+<p><mark class="kwic-target">倭</mark> target word &nbsp; <mark class="kwic-collocate">collocate</mark> selected collocate</p>
 </header>
 <main>{''.join(sections)}</main>
 </body>
@@ -549,6 +553,21 @@ th{{background:#eef3f4;white-space:nowrap}}
     with open(KWIC_HTML_OUT, 'w', encoding='utf-8') as html_file:
         html_file.write(html_document)
     print(f'KWIC report → {KWIC_HTML_OUT}')
+
+
+def highlight_kwic_text(text, collocate):
+    """Escape passage text while marking the target and selected collocate."""
+    pattern = re.compile(f'({re.escape(TARGET)}|{re.escape(collocate)})')
+    parts = pattern.split(text)
+    highlighted = []
+    for part in parts:
+        if part == TARGET:
+            highlighted.append(f'<mark class="kwic-target">{html.escape(part)}</mark>')
+        elif part == collocate:
+            highlighted.append(f'<mark class="kwic-collocate">{html.escape(part)}</mark>')
+        else:
+            highlighted.append(html.escape(part))
+    return ''.join(highlighted)
 
 
 def main():
