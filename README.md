@@ -4,4 +4,4 @@ Course: DHG 502 Digital Approaches in Historical Research
 
 Research Question: Collocation Analysis of “倭” Represent throughout Ming Shi 明史
 
-Source: Zhang, Tingyu 張廷玉, et al. Ming shi 明史. Digital text dataset. mcjkurz. "qh-starter". GitHub repository,2026. Commit 5d67025. https://github.com/mcjkurz/qh-starter/blob/main/%E6%98%8E%E5%8F%B2.txt
+Source: Zhang, Tingyu 張廷玉, et al. Ming shi 明史. Digital text dataset. mcjkurz, "qh-starter." GitHub repository, 2026, commit 5d67025. https://github.com/mcjkurz/qh-starter/blob/main/%E6%98%8E%E5%8F%B2.txt.
