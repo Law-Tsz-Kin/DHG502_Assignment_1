@@ -3,6 +3,10 @@
         "/^git status --short && printf '\\\\nRoot files:\\\\n' && git --no-pager ls-files$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^git pull --no-rebase --no-edit origin main$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }
