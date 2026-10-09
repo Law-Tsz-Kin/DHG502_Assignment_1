@@ -10,12 +10,13 @@ analysis.py — 《明史》「倭」字搭配（collocation）分析
     collocates_倭_window_h10.csv — 前後各 10 詞的窗口
     collocates_倭_sentence.csv   — 同句搭配
     kwic.csv                    — 十詞窗口 KWIC concordance
-    results.html                — 可互動的五頁英文分析報告
+    results.html                — 可互動的七頁英文分析報告（含兩張 PNG 摘要表）
     kwic.html                   — 十詞窗口 KWIC concordance
     table1_significance_vs_strength_5word.png
     table2_top_collocates_comparison.png
 """
 
+import base64
 import csv
 import html
 import json
@@ -221,8 +222,17 @@ def build_results_html():
 
     data_json = json.dumps(datasets, ensure_ascii=False, allow_nan=False)
     data_json = data_json.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+    with open(TABLE1_OUT, 'rb') as table1_file:
+        table1_data_url = 'data:image/png;base64,' + base64.b64encode(table1_file.read()).decode('ascii')
+    with open(TABLE2_OUT, 'rb') as table2_file:
+        table2_data_url = 'data:image/png;base64,' + base64.b64encode(table2_file.read()).decode('ascii')
     with open(HTML_OUT, 'w', encoding='utf-8') as html_file:
-        html_file.write(HTML_TEMPLATE.replace('__DATA_JSON__', data_json))
+        html_file.write(
+            HTML_TEMPLATE
+            .replace('__DATA_JSON__', data_json)
+            .replace('__TABLE1_IMAGE__', table1_data_url)
+            .replace('__TABLE2_IMAGE__', table2_data_url)
+        )
     print(f'Interactive report → {HTML_OUT}')
 
 
@@ -682,6 +692,7 @@ input{min-width:min(300px,100%)}
 .pager button:disabled{opacity:.45;cursor:not-allowed}
 .note{padding:14px 17px;border-radius:7px;background:#edf5f4;color:#28434b}
 .page-number{color:var(--muted);margin-top:14px;font-size:.9rem}
+.summary-image{display:block;width:100%;height:auto;margin:28px auto 0}
 @media(max-width:850px){.topbar-inner{align-items:flex-start;flex-direction:column;gap:10px}.brand{margin:0}.nav{max-height:130px;overflow:auto}}
 @media print{.topbar,.pager{display:none!important}body{background:white}main{max-width:none;margin:0;padding:0}.page{display:block!important;min-height:0;box-shadow:none;border:0;page-break-after:always;padding:24px}.table-wrap{overflow:visible}th{position:static}}
 </style>
@@ -692,7 +703,8 @@ input{min-width:min(300px,100%)}
 <nav class="nav" aria-label="Report pages">
 <button data-page="0">1 · Cover</button><button data-page="1">2 · 5-Word</button>
 <button data-page="2">3 · 10-Word</button><button data-page="3">4 · Sentence</button>
-<button data-page="4">5 · Compare</button>
+<button data-page="4">5 · Compare</button><button data-page="5">6 · Table 1</button>
+<button data-page="6">7 · Table 2</button>
 </nav></div></header>
 <main>
 <section class="page cover" id="page-1">
@@ -700,23 +712,23 @@ input{min-width:min(300px,100%)}
 <h1>Collocation Analysis of “倭” Represent throughout Ming Shi 明史</h1>
 <p class="lead">A comparison of words associated with 倭 in the Ming Shi, using two word-window sizes and whole-sentence context.</p>
 <div class="cards" id="overview-cards"></div>
-<p class="note">Pages 2–4 show the top 20 collocates in each method. Page 5 compares the methods.</p>
-<div class="page-number">Page 1 of 5</div>
+<p class="note">Pages 2–4 show the top 20 collocates in each method; page 5 compares the methods. Pages 6 and 7 contain summary tables of collocate significance, strength, and cross-method results.</p>
+<div class="page-number">Page 1 of 7</div>
 </section>
 <section class="page" id="page-2">
 <div class="eyebrow">Window method · horizon = 5</div><h2>5-Word Analysis</h2>
 <p class="subtitle">Top 20 collocates by logDice from all collocates with p-value &lt; 0.05, within five tokens to either side of 倭. Adjusted p-values are reported but are not used as an inclusion filter.</p>
-<div class="cards" id="stats-window_h5"></div><div class="table-wrap" id="table-window_h5"></div><div class="page-number">Page 2 of 5</div>
+<div class="cards" id="stats-window_h5"></div><div class="table-wrap" id="table-window_h5"></div><div class="page-number">Page 2 of 7</div>
 </section>
 <section class="page" id="page-3">
 <div class="eyebrow">Window method · horizon = 10</div><h2>10-Word Analysis</h2>
 <p class="subtitle">Top 20 collocates by logDice from all collocates with p-value &lt; 0.05, within ten tokens to either side of 倭. Adjusted p-values are reported but are not used as an inclusion filter.</p>
-<div class="cards" id="stats-window_h10"></div><div class="table-wrap" id="table-window_h10"></div><div class="page-number">Page 3 of 5</div>
+<div class="cards" id="stats-window_h10"></div><div class="table-wrap" id="table-window_h10"></div><div class="page-number">Page 3 of 7</div>
 </section>
 <section class="page" id="page-4">
 <div class="eyebrow">Sentence method</div><h2>Sentence Analysis</h2>
 <p class="subtitle">Top 20 collocates by logDice from all collocates with p-value &lt; 0.05, occurring in the same sentence as 倭. Adjusted p-values are reported but are not used as an inclusion filter.</p>
-<div class="cards" id="stats-sentence"></div><div class="table-wrap" id="table-sentence"></div><div class="page-number">Page 4 of 5</div>
+<div class="cards" id="stats-sentence"></div><div class="table-wrap" id="table-sentence"></div><div class="page-number">Page 4 of 7</div>
 </section>
 <section class="page" id="page-5">
 <div class="eyebrow">Cross-method comparison</div><h2>Compare the Three Analyses</h2>
@@ -724,7 +736,19 @@ input{min-width:min(300px,100%)}
 <div class="toolbar"><label for="metric-choice">Measure</label><select id="metric-choice"><option value="log_dice">logDice</option><option value="log_likelihood">Log-likelihood</option></select>
 <label for="compare-search">Find a collocate</label><input id="compare-search" type="search" placeholder="Type a word to filter"></div>
 <div class="table-wrap" id="comparison-table"></div>
-<div class="page-number">Page 5 of 5</div>
+<div class="page-number">Page 5 of 7</div>
+</section>
+<section class="page" id="page-6">
+<div class="eyebrow">5-Word window · significance vs. strength</div><h2>Table 1. Top 10 Collocates</h2>
+<p class="subtitle">Significance is ranked by log-likelihood; strength is ranked by logDice.</p>
+<img class="summary-image" src="__TABLE1_IMAGE__" alt="Table 1: top 10 5-Word collocates ranked by significance and strength">
+<div class="page-number">Page 6 of 7</div>
+</section>
+<section class="page" id="page-7">
+<div class="eyebrow">Cross-method comparison</div><h2>Table 2. Top Collocates Across Methods</h2>
+<p class="subtitle">Top collocates compared across the 5-Word, 10-Word, and Sentence methods.</p>
+<img class="summary-image" src="__TABLE2_IMAGE__" alt="Table 2: top collocates compared across 5-Word, 10-Word, and Sentence methods">
+<div class="page-number">Page 7 of 7</div>
 </section>
 <div class="pager"><button id="previous-page">← Previous page</button><button id="next-page">Next page →</button></div>
 </main>
@@ -746,11 +770,11 @@ const columns=[
 const pageButtons=[...document.querySelectorAll('.nav button')];
 let activePage=0;
 function setPage(index,updateHash=true){
-  activePage=Math.max(0,Math.min(4,index));
+  activePage=Math.max(0,Math.min(6,index));
   document.querySelectorAll('.page').forEach((page,i)=>page.classList.toggle('active',i===activePage));
   pageButtons.forEach((button,i)=>button.classList.toggle('active',i===activePage));
   document.getElementById('previous-page').disabled=activePage===0;
-  document.getElementById('next-page').disabled=activePage===4;
+  document.getElementById('next-page').disabled=activePage===6;
   if(updateHash)history.replaceState(null,'','#page-'+(activePage+1));
   window.scrollTo({top:0,behavior:'smooth'});
 }
@@ -845,7 +869,7 @@ function renderComparison(){
 metricChoice.addEventListener('change',()=>{comparisonSortKey='rank-window_h5';comparisonAscending=true;renderComparison()});
 searchInput.addEventListener('input',renderComparison);
 renderComparison();
-const hashMatch=location.hash.match(/^#page-([1-5])$/);
+const hashMatch=location.hash.match(/^#page-([1-7])$/);
 setPage(hashMatch?Number(hashMatch[1])-1:0,false);
 </script>
 </body>
