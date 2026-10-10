@@ -3,5 +3,5 @@ opencc>=1.4        # Traditional-to-simplified Chinese conversion
 jieba>=0.42.1      # Chinese tokenization
 qhchina>=0.2.7     # Collocation statistics and classical Chinese stopwords
 pandas>=2.0        # Read/write collocation, KWIC, and report tables
-matplotlib>=3.7    # Render summary tables as PNGs embedded in results.html
+matplotlib>=3.7    # Render collocation summary tables as PNGs
 mplfonts>=0.0.11   # Provide Simplified Chinese font glyphs for PNG tables

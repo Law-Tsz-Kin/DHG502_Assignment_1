@@ -10,7 +10,7 @@ analysis.py — 《明史》「倭」字搭配（collocation）分析
     collocates_倭_window_h10.csv — 前後各 10 詞的窗口
     collocates_倭_sentence.csv   — 同句搭配
     kwic.csv                    — 十詞窗口 KWIC concordance
-    results.html                — 可互動的七頁英文分析報告（含兩張 PNG 摘要表）
+    results.html                — 可互動的五頁英文分析報告
     kwic.html                   — 十詞窗口 KWIC concordance
     table1_significance_vs_strength_5word.png
     table2_top_collocates_comparison.png
@@ -56,6 +56,7 @@ KWIC_HTML_OUT = os.path.join(OUTDIR, 'kwic.html')
 KWIC_CSV_OUT = os.path.join(OUTDIR, 'kwic.csv')
 TABLE1_OUT = os.path.join(OUTDIR, 'table1_significance_vs_strength_5word.png')
 TABLE2_OUT = os.path.join(OUTDIR, 'table2_top_collocates_comparison.png')
+TOP20_CSV_TEMPLATE = f'top20_collocates_{TARGET}_{{key}}.csv'
 KWIC_COLLOCATES = ['王京', '新']
 KWIC_LIMIT = 10
 TABLE_TOP_N = 10
@@ -75,6 +76,7 @@ RUNS = [
         'label': '5-Word Analysis',
         'key': 'window_h5',
         'filename': f'collocates_{TARGET}_window_h5.csv',
+        'top20_filename': TOP20_CSV_TEMPLATE.format(key='window_h5'),
     },
     {
         'method': 'window',
@@ -82,6 +84,7 @@ RUNS = [
         'label': '10-Word Analysis',
         'key': 'window_h10',
         'filename': f'collocates_{TARGET}_window_h10.csv',
+        'top20_filename': TOP20_CSV_TEMPLATE.format(key='window_h10'),
     },
     {
         'method': 'sentence',
@@ -89,6 +92,7 @@ RUNS = [
         'label': 'Sentence Analysis',
         'key': 'sentence',
         'filename': f'collocates_{TARGET}_sentence.csv',
+        'top20_filename': TOP20_CSV_TEMPLATE.format(key='sentence'),
     },
 ]
 
@@ -210,28 +214,21 @@ def build_results_html():
         input_path = os.path.join(OUTDIR, run['filename'])
         full_df = pd.read_csv(input_path, encoding='utf-8-sig')
         significant_counts[run['key']] = len(full_df)
-        df = full_df.head(MAX_COLLOCATES)
         datasets[run['key']] = [
             {
                 key: None if value != value else value.item() if hasattr(value, 'item') else value
                 for key, value in row.items()
             }
-            for row in df.to_dict(orient='records')
+            for row in full_df.to_dict(orient='records')
         ]
     datasets['significant_counts'] = significant_counts
 
     data_json = json.dumps(datasets, ensure_ascii=False, allow_nan=False)
     data_json = data_json.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
-    with open(TABLE1_OUT, 'rb') as table1_file:
-        table1_data_url = 'data:image/png;base64,' + base64.b64encode(table1_file.read()).decode('ascii')
-    with open(TABLE2_OUT, 'rb') as table2_file:
-        table2_data_url = 'data:image/png;base64,' + base64.b64encode(table2_file.read()).decode('ascii')
     with open(HTML_OUT, 'w', encoding='utf-8') as html_file:
         html_file.write(
             HTML_TEMPLATE
             .replace('__DATA_JSON__', data_json)
-            .replace('__TABLE1_IMAGE__', table1_data_url)
-            .replace('__TABLE2_IMAGE__', table2_data_url)
         )
     print(f'Interactive report → {HTML_OUT}')
 
@@ -351,7 +348,6 @@ def build_collocation_tables(datasets):
     )
 
     run_keys = ('window_h5', 'window_h10', 'sentence')
-    run_labels = ('5-Word', '10-Word', 'Sentence')
     ranked_runs = {
         key: datasets[key].sort_values(
             ['log_dice', 'collocate'],
@@ -360,16 +356,13 @@ def build_collocation_tables(datasets):
         ).reset_index(drop=True)
         for key in run_keys
     }
-    ranked_top_runs = {
-        key: frame.head(TABLE_TOP_N)
-        for key, frame in ranked_runs.items()
-    }
-    top_ten_ranks = {}
-    for key in run_keys:
-        top_ten_ranks[key] = {
+    top_ten_ranks = {
+        key: {
             row['collocate']: rank + 1
-            for rank, row in ranked_top_runs[key].iterrows()
+            for rank, row in ranked_runs[key].head(TABLE_TOP_N).iterrows()
         }
+        for key in run_keys
+    }
     union = set().union(*(set(ranks) for ranks in top_ten_ranks.values()))
     ordered_collocates = sorted(
         union,
@@ -589,6 +582,8 @@ def main():
     stopwords = load_stopwords('zh_cl_sim')
     table_datasets = {}
     printed_datasets = {}
+    dataset_counts = {}
+    collocates_by_run = {}
     for run in RUNS:
         method, horizon, label = run['method'], run['horizon'], run['key']
         df = find_collocates(
@@ -612,14 +607,21 @@ def main():
             ascending=[False, True],
             kind='mergesort',
         )
+        dataset_counts[run['key']] = len(df)
         table_datasets[run['key']] = df.copy()
+        collocates_by_run[run['key']] = set(df['collocate'])
         printed_datasets[run['key']] = df.head(MAX_COLLOCATES).copy()
 
         output_path = os.path.join(OUTDIR, f'collocates_{TARGET}_{label}.csv')
         df.to_csv(output_path, index=False, encoding='utf-8-sig')
+        top20_path = os.path.join(OUTDIR, run['top20_filename'])
+        df.head(MAX_COLLOCATES).to_csv(
+            top20_path, index=False, encoding='utf-8-sig',
+        )
+        print(f'Top 20 collocates CSV → {top20_path}')
 
     shared_collocates = set.intersection(
-        *(set(dataset['collocate']) for dataset in table_datasets.values())
+        *collocates_by_run.values()
     )
     if shared_collocates:
         print(
@@ -635,7 +637,7 @@ def main():
         ]
         print(
             f'搭配詞結果（{label}）→ {output_path}'
-            f'（CSV {len(table_datasets[label])} 列；列印 {len(printed_df)} 列）'
+            f'（CSV {dataset_counts[label]} 列；列印 {len(printed_df)} 列）'
         )
         print(printed_df.to_string(index=False))
         print()
@@ -683,16 +685,36 @@ th:first-child,td:first-child{text-align:left}
 th button{border:0;background:transparent;color:inherit;font-weight:700;padding:2px;cursor:pointer}
 th button:hover{color:var(--teal);text-decoration:underline}
 tbody tr:hover{background:#f0f8f7}
-.toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:20px 0 4px}
+#page-5 .toolbar{display:block;margin:20px 0 4px}
 .toolbar label{font-weight:650}
 select,input{border:1px solid #b9c6cb;border-radius:6px;padding:9px 11px;background:white;color:var(--ink)}
 input{min-width:min(300px,100%)}
+.comparison-search-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
+.comparison-search-row label{white-space:nowrap}
+.comparison-search-row input{flex:1 1 280px;min-width:0}
+.comparison-sort-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+.measure-options{display:flex;gap:8px 16px;flex-wrap:wrap;border:1px solid var(--line);border-radius:7px;padding:12px 14px}
+.measure-options legend{font-weight:650;padding:0 5px}
+.measure-options label{display:inline-flex;align-items:center;gap:6px;font-weight:400}
+.measure-options input{min-width:0;margin:0}
+.measure-options{width:100%}
+.comparison-list{max-height:65vh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;border:1px solid var(--line);border-radius:8px;margin-top:22px;padding:12px}
+.comparison-item{min-width:0;border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:12px;background:#fbfcfc}
+.comparison-item:last-child{margin-bottom:0}
+.comparison-item h3{margin:0 0 10px;overflow-wrap:anywhere}
+.comparison-measure{display:grid;grid-template-columns:minmax(120px,.8fr) repeat(3,minmax(0,1fr));gap:8px;align-items:stretch;padding:8px 0;border-top:1px solid var(--line)}
+.comparison-measure-name{font-weight:650;overflow-wrap:anywhere}
+.comparison-method{min-width:0;padding:8px;border-radius:6px;background:#eef3f4;overflow-wrap:anywhere}
+.comparison-method strong,.comparison-method span{display:block}
+.comparison-method strong{font-size:.85rem;color:var(--muted);margin-bottom:3px}
+.comparison-empty{padding:18px 4px;margin:0;color:var(--muted)}
+#comparison-sort-direction{border:1px solid #b9c6cb;border-radius:6px;padding:9px 11px;background:white;color:var(--ink);cursor:pointer}
+@media(max-width:700px){.comparison-measure{grid-template-columns:minmax(0,1fr)}}
 .pager{display:flex;justify-content:space-between;gap:12px;margin-top:18px}
 .pager button{background:var(--blue)}
 .pager button:disabled{opacity:.45;cursor:not-allowed}
 .note{padding:14px 17px;border-radius:7px;background:#edf5f4;color:#28434b}
 .page-number{color:var(--muted);margin-top:14px;font-size:.9rem}
-.summary-image{display:block;width:100%;height:auto;margin:28px auto 0}
 @media(max-width:850px){.topbar-inner{align-items:flex-start;flex-direction:column;gap:10px}.brand{margin:0}.nav{max-height:130px;overflow:auto}}
 @media print{.topbar,.pager{display:none!important}body{background:white}main{max-width:none;margin:0;padding:0}.page{display:block!important;min-height:0;box-shadow:none;border:0;page-break-after:always;padding:24px}.table-wrap{overflow:visible}th{position:static}}
 </style>
@@ -703,8 +725,7 @@ input{min-width:min(300px,100%)}
 <nav class="nav" aria-label="Report pages">
 <button data-page="0">1 · Cover</button><button data-page="1">2 · 5-Word</button>
 <button data-page="2">3 · 10-Word</button><button data-page="3">4 · Sentence</button>
-<button data-page="4">5 · Compare</button><button data-page="5">6 · Table 1</button>
-<button data-page="6">7 · Table 2</button>
+<button data-page="4">5 · Compare</button>
 </nav></div></header>
 <main>
 <section class="page cover" id="page-1">
@@ -712,43 +733,44 @@ input{min-width:min(300px,100%)}
 <h1>Collocation Analysis of “倭” Represent throughout Ming Shi 明史</h1>
 <p class="lead">A comparison of words associated with 倭 in the Ming Shi, using two word-window sizes and whole-sentence context.</p>
 <div class="cards" id="overview-cards"></div>
-<p class="note">Pages 2–4 show the top 20 collocates in each method; page 5 compares the methods. Pages 6 and 7 contain summary tables of collocate significance, strength, and cross-method results.</p>
-<div class="page-number">Page 1 of 7</div>
+<p class="note">Pages 2–4 show the top 20 collocates in each method; page 5 compares selected measures across the methods.</p>
+<div class="page-number">Page 1 of 5</div>
 </section>
 <section class="page" id="page-2">
 <div class="eyebrow">Window method · horizon = 5</div><h2>5-Word Analysis</h2>
 <p class="subtitle">Top 20 collocates by logDice from all collocates with p-value &lt; 0.05, within five tokens to either side of 倭. Adjusted p-values are reported but are not used as an inclusion filter.</p>
-<div class="cards" id="stats-window_h5"></div><div class="table-wrap" id="table-window_h5"></div><div class="page-number">Page 2 of 7</div>
+<div class="cards" id="stats-window_h5"></div><div class="table-wrap" id="table-window_h5"></div><div class="page-number">Page 2 of 5</div>
 </section>
 <section class="page" id="page-3">
 <div class="eyebrow">Window method · horizon = 10</div><h2>10-Word Analysis</h2>
 <p class="subtitle">Top 20 collocates by logDice from all collocates with p-value &lt; 0.05, within ten tokens to either side of 倭. Adjusted p-values are reported but are not used as an inclusion filter.</p>
-<div class="cards" id="stats-window_h10"></div><div class="table-wrap" id="table-window_h10"></div><div class="page-number">Page 3 of 7</div>
+<div class="cards" id="stats-window_h10"></div><div class="table-wrap" id="table-window_h10"></div><div class="page-number">Page 3 of 5</div>
 </section>
 <section class="page" id="page-4">
 <div class="eyebrow">Sentence method</div><h2>Sentence Analysis</h2>
 <p class="subtitle">Top 20 collocates by logDice from all collocates with p-value &lt; 0.05, occurring in the same sentence as 倭. Adjusted p-values are reported but are not used as an inclusion filter.</p>
-<div class="cards" id="stats-sentence"></div><div class="table-wrap" id="table-sentence"></div><div class="page-number">Page 4 of 7</div>
+<div class="cards" id="stats-sentence"></div><div class="table-wrap" id="table-sentence"></div><div class="page-number">Page 4 of 5</div>
 </section>
 <section class="page" id="page-5">
 <div class="eyebrow">Cross-method comparison</div><h2>Compare the Three Analyses</h2>
-<p class="subtitle">Choose a measure to compare its score and within-run rank for every collocate across 5-word, 10-word, and sentence contexts.</p>
-<div class="toolbar"><label for="metric-choice">Measure</label><select id="metric-choice"><option value="log_dice">logDice</option><option value="log_likelihood">Log-likelihood</option></select>
-<label for="compare-search">Find a collocate</label><input id="compare-search" type="search" placeholder="Type a word to filter"></div>
-<div class="table-wrap" id="comparison-table"></div>
-<div class="page-number">Page 5 of 7</div>
-</section>
-<section class="page" id="page-6">
-<div class="eyebrow">5-Word window · significance vs. strength</div><h2>Table 1. Top 10 Collocates</h2>
-<p class="subtitle">Significance is ranked by log-likelihood; strength is ranked by logDice.</p>
-<img class="summary-image" src="__TABLE1_IMAGE__" alt="Table 1: top 10 5-Word collocates ranked by significance and strength">
-<div class="page-number">Page 6 of 7</div>
-</section>
-<section class="page" id="page-7">
-<div class="eyebrow">Cross-method comparison</div><h2>Table 2. Top Collocates Across Methods</h2>
-<p class="subtitle">Top collocates compared across the 5-Word, 10-Word, and Sentence methods.</p>
-<img class="summary-image" src="__TABLE2_IMAGE__" alt="Table 2: top collocates compared across 5-Word, 10-Word, and Sentence methods">
-<div class="page-number">Page 7 of 7</div>
+<p class="subtitle">Collocate is shown for every row. Select one or more measures to compare values and within-run ranks across 5-word, 10-word, and sentence contexts.</p>
+<div class="toolbar"><fieldset class="measure-options"><legend>Measures</legend>
+<label><input type="checkbox" name="measure" value="exp_local"> Expected local</label>
+<label><input type="checkbox" name="measure" value="obs_local"> Observed local</label>
+<label><input type="checkbox" name="measure" value="ratio_local"> Local ratio</label>
+<label><input type="checkbox" name="measure" value="obs_global"> Observed global</label>
+<label><input type="checkbox" name="measure" value="p_value"> p-value</label>
+<label><input type="checkbox" name="measure" value="log_likelihood"> Log-likelihood</label>
+<label><input type="checkbox" name="measure" value="log_dice" checked> logDice</label>
+<label><input type="checkbox" name="measure" value="adjusted_p_value"> Adjusted p-value</label>
+</fieldset>
+<div class="comparison-search-row">
+<label for="compare-search">Find a collocate</label><input id="compare-search" type="search" placeholder="Type a word to filter">
+</div>
+<div class="comparison-sort-row"><label for="comparison-sort">Sort rows by</label><select id="comparison-sort"></select>
+<button class="sort-direction" id="comparison-sort-direction" type="button">Descending</button></div></div>
+<div class="comparison-list" id="comparison-table"></div>
+<div class="page-number">Page 5 of 5</div>
 </section>
 <div class="pager"><button id="previous-page">← Previous page</button><button id="next-page">Next page →</button></div>
 </main>
@@ -770,11 +792,11 @@ const columns=[
 const pageButtons=[...document.querySelectorAll('.nav button')];
 let activePage=0;
 function setPage(index,updateHash=true){
-  activePage=Math.max(0,Math.min(6,index));
+  activePage=Math.max(0,Math.min(4,index));
   document.querySelectorAll('.page').forEach((page,i)=>page.classList.toggle('active',i===activePage));
   pageButtons.forEach((button,i)=>button.classList.toggle('active',i===activePage));
   document.getElementById('previous-page').disabled=activePage===0;
-  document.getElementById('next-page').disabled=activePage===6;
+  document.getElementById('next-page').disabled=activePage===4;
   if(updateHash)history.replaceState(null,'','#page-'+(activePage+1));
   window.scrollTo({top:0,behavior:'smooth'});
 }
@@ -816,7 +838,7 @@ function makeSortableTable(container,rows,tableColumns,initialKey,initialAscendi
   draw();
 }
 function renderRun(key){
-  const rows=datasets[key].map((row,index)=>({...row,rank:index+1}));
+  const rows=datasets[key].slice(0,20).map((row,index)=>({...row,rank:index+1}));
   const ranked=[...rows].sort((a,b)=>b.log_dice-a.log_dice);
   const best=ranked[0];
   const cards=[
@@ -835,41 +857,145 @@ runInfo.forEach(run=>renderRun(run.key));
 document.getElementById('overview-cards').innerHTML=runInfo.map(run=>
   '<div class="card">'+run.label+'<strong>'+datasets.significant_counts[run.key].toLocaleString()+' collocates (p < 0.05)</strong></div>'
 ).join('');
-const metricChoice=document.getElementById('metric-choice'),searchInput=document.getElementById('compare-search');
-let comparisonSortKey='rank-window_h5',comparisonAscending=true;
+const measureInfo=[
+  {key:'exp_local',label:'Expected local'},
+  {key:'obs_local',label:'Observed local'},
+  {key:'ratio_local',label:'Local ratio'},
+  {key:'obs_global',label:'Observed global'},
+  {key:'p_value',label:'p-value',ascending:true},
+  {key:'log_likelihood',label:'Log-likelihood'},
+  {key:'log_dice',label:'logDice'},
+  {key:'adjusted_p_value',label:'Adjusted p-value',ascending:true}
+];
+const measureInputs=[...document.querySelectorAll('input[name="measure"]')];
+const searchInput=document.getElementById('compare-search');
+const comparisonSort=document.getElementById('comparison-sort');
+const comparisonSortDirection=document.getElementById('comparison-sort-direction');
+let comparisonSortKey='score-log_dice-window_h5',comparisonAscending=false;
 function renderComparison(){
-  const metric=metricChoice.value;
-  const indexed=runInfo.map(run=>{
-    const ranked=[...datasets[run.key]].sort((a,b)=>b[metric]-a[metric]);
-    const map=new Map(ranked.map((row,index)=>[row.collocate,{score:row[metric],rank:index+1}]));
-    return {run,map};
-  });
-  const words=[...new Set(indexed.flatMap(item=>[...item.map.keys()]))];
+  const selectedMeasures=measureInfo.filter(measure=>
+    measureInputs.some(input=>input.checked&&input.value===measure.key)
+  );
+  const indexed=selectedMeasures.flatMap(measure=>runInfo.map(run=>{
+    const direction=measure.ascending?1:-1;
+    const ranked=[...datasets[run.key]].sort((a,b)=>{
+      const left=a[measure.key],right=b[measure.key];
+      if(left===null||left===undefined)return right===null||right===undefined?0:1;
+      if(right===null||right===undefined)return -1;
+      const difference=left-right;
+      return direction*difference;
+    });
+    const map=new Map(ranked.map((row,index)=>[
+      row.collocate,{value:row[measure.key],rank:index+1}
+    ]));
+    return {measure,run,map};
+  }));
+  if(selectedMeasures.length===0){
+    document.getElementById('comparison-table').replaceChildren();
+    comparisonSort.replaceChildren();
+    document.getElementById('comparison-table').append(
+      Object.assign(document.createElement('p'),{
+        className:'comparison-empty',
+        textContent:'Select one or more measures to compare.'
+      })
+    );
+    return;
+  }
+  const words=[...new Set(runInfo.flatMap(run=>
+    datasets[run.key].map(row=>row.collocate)
+  ))];
   const query=searchInput.value.trim().toLocaleLowerCase();
   const rows=words.filter(word=>word.toLocaleLowerCase().includes(query)).map(word=>{
     const row={collocate:word};
-    indexed.forEach(({run,map})=>{
+    indexed.forEach(({measure,run,map})=>{
       const entry=map.get(word);
-      row['score-'+run.key]=entry?entry.score:null;
-      row['rank-'+run.key]=entry?entry.rank:null;
+      row['score-'+measure.key+'-'+run.key]=entry?entry.value:null;
+      row['rank-'+measure.key+'-'+run.key]=entry?entry.rank:null;
     });
     return row;
   });
-  const compareColumns=[['collocate','Collocate','text']];
-  runInfo.forEach(run=>{
-    compareColumns.push(['score-'+run.key,run.label+' score ('+(metric==='log_dice'?'logDice':'log-likelihood')+')','number']);
-    compareColumns.push(['rank-'+run.key,run.label+' rank','number']);
+  const compareColumns=[['collocate','Collocate']];
+  selectedMeasures.forEach(measure=>{
+    runInfo.forEach(run=>{
+      compareColumns.push([
+        'score-'+measure.key+'-'+run.key,
+        run.label+' · '+measure.label
+      ]);
+    });
   });
-  makeSortableTable(document.getElementById('comparison-table'),rows,compareColumns,comparisonSortKey,comparisonAscending,key=>{
-    if(comparisonSortKey===key)comparisonAscending=!comparisonAscending;
-    else{comparisonSortKey=key;comparisonAscending=key==='collocate'}
-    renderComparison();
+  if(!compareColumns.some(([key])=>key===comparisonSortKey)){
+    comparisonSortKey='score-'+selectedMeasures[0].key+'-'+runInfo[0].key;
+    comparisonAscending=Boolean(selectedMeasures[0].ascending);
+  }
+  comparisonSort.replaceChildren(...compareColumns.map(([key,label])=>{
+    const option=document.createElement('option');
+    option.value=key;
+    option.textContent=label;
+    option.selected=key===comparisonSortKey;
+    return option;
+  }));
+  comparisonSortDirection.textContent=comparisonAscending?'Ascending':'Descending';
+  const sortedRows=[...rows].sort((left,right)=>{
+    const first=left[comparisonSortKey],second=right[comparisonSortKey];
+    if(first===null||first===undefined)return second===null||second===undefined?0:1;
+    if(second===null||second===undefined)return -1;
+    const difference=typeof first==='string'
+      ?first.localeCompare(second)
+      :first-second;
+    return comparisonAscending?difference:-difference;
   });
+  const items=sortedRows.map(row=>{
+    const item=document.createElement('article');
+    item.className='comparison-item';
+    const heading=document.createElement('h3');
+    heading.textContent=row.collocate;
+    item.append(heading);
+    selectedMeasures.forEach(measure=>{
+      const measureRow=document.createElement('div');
+      measureRow.className='comparison-measure';
+      const label=document.createElement('div');
+      label.className='comparison-measure-name';
+      label.textContent=measure.label;
+      measureRow.append(label);
+      runInfo.forEach(run=>{
+        const method=document.createElement('div');
+        method.className='comparison-method';
+        const methodLabel=document.createElement('strong');
+        methodLabel.textContent=run.label;
+        const score=document.createElement('span');
+        score.textContent=formatValue(row['score-'+measure.key+'-'+run.key],measure.key);
+        const rank=document.createElement('span');
+        rank.textContent='Rank: '+formatValue(row['rank-'+measure.key+'-'+run.key],'rank');
+        method.append(methodLabel,score,rank);
+        measureRow.append(method);
+      });
+      item.append(measureRow);
+    });
+    return item;
+  });
+  if(items.length===0){
+    items.push(Object.assign(document.createElement('p'),{
+      className:'comparison-empty',
+      textContent:'No collocates match this search.'
+    }));
+  }
+  document.getElementById('comparison-table').replaceChildren(...items);
 }
-metricChoice.addEventListener('change',()=>{comparisonSortKey='rank-window_h5';comparisonAscending=true;renderComparison()});
+comparisonSort.addEventListener('change',()=>{
+  comparisonSortKey=comparisonSort.value;
+  comparisonAscending=comparisonSortKey==='collocate'
+    ||comparisonSortKey.startsWith('score-p_value-')
+    ||comparisonSortKey.startsWith('score-adjusted_p_value-');
+  renderComparison();
+});
+comparisonSortDirection.addEventListener('click',()=>{
+  comparisonAscending=!comparisonAscending;
+  renderComparison();
+});
+measureInputs.forEach(input=>input.addEventListener('change',renderComparison));
 searchInput.addEventListener('input',renderComparison);
 renderComparison();
-const hashMatch=location.hash.match(/^#page-([1-7])$/);
+const hashMatch=location.hash.match(/^#page-([1-5])$/);
 setPage(hashMatch?Number(hashMatch[1])-1:0,false);
 </script>
 </body>
