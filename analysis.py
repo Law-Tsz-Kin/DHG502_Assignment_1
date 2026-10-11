@@ -1,20 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-analysis.py — 《明史》「倭」字搭配（collocation）分析
-執行本腳本即可預處理語料、分析搭配詞並產生互動報告：
-    python analysis.py
-
-搭配詞結果輸出（output/）：
-    collocates_倭_window_h5.csv  — 前後各 5 詞的窗口
-    collocates_倭_window_h10.csv — 前後各 10 詞的窗口
-    collocates_倭_sentence.csv   — 同句搭配
-    kwic.csv                    — 十詞窗口 KWIC concordance
-    results.html                — 可互動的五頁英文分析報告
-    kwic.html                   — 十詞窗口 KWIC concordance
-    table1_significance_vs_strength_5word.png
-    table2_top_collocates_comparison.png
-"""
+"""Preprocess the Ming Shi corpus, compute collocations for the target term 倭,
+and generate the report artifacts in output/."""
 
 import base64
 import csv
