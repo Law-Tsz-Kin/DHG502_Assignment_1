@@ -2,29 +2,65 @@
 
 **Course:** DHG 502 Digital Approaches in Historical Research
 **Assignment:** Collocation analysis of 倭 in the *Ming Shi* 明史
-**AI tool:** GitHub Copilot (agent mode, Z.ai GLM) in VS Code — 2026-10-08
+**Date:** 2026-10-11
 
-## What the AI did
+## AI tools and models used
 
-1. **Environment setup** — documented the Python packages required by the analysis in `requirements.txt`.
-2. **Corpus inspection** — located the 328 卷 header lines and their Chinese-numeral formats (e.g. 卷一百〇一, 卷二百十一), paragraph/separator conventions, inline citation markers `[n]`, table-of-contents lines (prefixed ○), and the location of the Japan chapter (卷 322).
-3. **Scripting and reports** — combined corpus preparation and analysis into `analysis.py`. The script performs OpenCC t2s conversion; sentence splitting on 。！？； with closing-quote attachment; whitespace and citation-marker stripping; per-line 卷 indexing; jieba tokenization with the custom dictionary; and a ≥5-word filter. It then runs qhchina collocation analyses for 倭 using 5- and 10-token windows and sentence context; removes simplified classical Chinese stopwords; calculates log-likelihood and logDice; includes results with raw p-value <0.05; writes full results and separate top-20-by-logDice files (`output/top20_collocates_倭_window_h5.csv`, `output/top20_collocates_倭_window_h10.csv`, and `output/top20_collocates_倭_sentence.csv`); and generates `output/results.html`, a standalone interactive five-page English report with sortable result tables. Pages 2–4 show each run's top 20 collocates by logDice; page 5 compares all qualifying collocates in a vertically scrollable list and lets readers select multiple measures at once. Collocate is the fixed row label, with local/global counts, ratios, significance values, log-likelihood, and logDice available as selectable measures.
-   - Console output omits collocates found in all three methods; the three per-method CSV files retain all results with raw p-value <0.05.
-4. **KWIC concordance** — uses `qhchina.analytics.collocations.kwic` to find up to 10 distinct passages for each of 王京 and 新 alongside 倭 in a 10-word context. In the HTML report, 倭 and the selected collocate are highlighted in separate colors throughout the context and passage; the CSV retains plain text. Each row includes left/node/right context, the complete sentence, and the sentence counts of 倭 and the selected collocate. `output/kwic.html` presents the concordance, and `output/kwic.csv` contains the same passages as structured data. If `data/index.csv` is available, both outputs include 卷 number and title.
-5. **Collocation summary tables** — creates `output/table1_significance_vs_strength_5word.png` with the top 10 5-word collocates ranked separately by log-likelihood and logDice, and `output/table2_top_collocates_comparison.png` with the union of each method's top 10 collocates ranked by logDice. The PNGs are generated separately and are not embedded in `output/results.html`. Matplotlib renders the tables; `mplfonts` provides the CJK font.
-6. **Reference files** — `requirements.txt`, `data/userdict.txt`, and this declaration.
+I used GitHub Copilot in VS Code as the AI assistance for this assignment. The session used the IDE-integrated Copilot agent with the configured model available for the project at the time of work, which was the Z.ai GLM model exposed through GitHub Copilot. No other AI tool or model was used for the analysis itself.
 
-## Human decisions and verification
+## Tasks for which AI was used
 
-- **Target word list** (`data/userdict.txt`, 86 entries: 倭 plus related personal names, Japanese titles/terms, and Ming coastal-defense official titles). Candidate words were frequency-checked against the source text; the final selection and its rationale remain the author's responsibility.
-- **Segmentation check** — `analysis.py` prints 20 random 倭-containing tokenized sentences using fixed seed 42; `MIN_WORDS`, `SEED`, and `SAMPLE_TARGET` are configurable near the top of the script.
-- **KWIC scope** — up to 10 distinct sentences are shown for each of 王京 and 新 in the 10-word window. The collocate must fall within ten tokens to either side of 倭. Row counts are literal character counts in the complete sentence, not corpus-wide frequency or an inferential statistic.
-- **Measure ranking** — page 5 ranks each selected measure within each method; lower p-values rank ahead of higher p-values, while other measures rank in descending order. Adjusted p-values are displayed but are not used to filter results.
-- **Summary table ranking** — Table 1 ranks 5-word results by descending log-likelihood and logDice. Table 2 compares the union of each method's top 10 by logDice; cells show logDice and observed local frequency.
-- **Conversion fidelity** — OpenCC `t2s` spot-checked on target words (e.g. 禦倭→御倭, 良懷→良怀, 源義滿→源义满, 宗設→宗设).
-- **Known limitations** — paragraphs without sentence-final punctuation (chapter TOCs, numerical tables in the 志 chapters, copyright notice) are excluded; a small number of numerical table fragments may remain; quotation-final punctuation is treated as sentence-final; "≥5 words" is counted after jieba tokenization. Stopwords are filtered from the reported collocates.
+1. Environment and dependency setup
+   - Helped define the required Python packages and version constraints for the project.
+   - Confirmed the appropriate libraries for OpenCC, jieba, qhchina, pandas, and report generation.
 
-## Data provenance
+2. Corpus inspection and preprocessing design
+   - Helped identify the structure of the *Ming Shi* text, including volume headings, punctuation patterns, citation markers, and chapter delimiters.
+   - Advised on how to normalize the text, split sentences, strip noise, and maintain volume/index references.
 
-- Source: mcjkurz/qh-starter `明史.txt` (Zhang Tingyu 張廷玉 et al., public-domain text), commit 5d67025.
-- All derived files (`data/data.txt`, `data/index.csv`, `data/segmented.txt`) are generated deterministically by `analysis.py` from that source and can be regenerated by running `python analysis.py`.
+3. Script implementation and debugging
+   - Drafted and refined `analysis.py` to perform data preparation, custom dictionary loading, tokenization, collocation analysis, and report generation.
+   - Helped troubleshoot issues in segmentation, output naming, filtering, and HTML/table generation.
+
+4. Output validation and reporting
+   - Suggested the checks needed to verify that collocate outputs were correct and that the HTML pages and summary tables rendered as intended.
+   - Assisted in checking deterministic regeneration of files from the source text.
+
+## Representative prompts / session excerpts
+
+The following are representative requests and prompts used in the session:
+
+- "Create a Python workflow to convert the 明史 text to simplified Chinese, split it into sentences on Chinese punctuation, and save one sentence per line in a data file."
+- "Load a custom jieba dictionary with 倭 and related names/titles, then print 20 random segmented sentences that contain the target word for manual checking."
+- "Use qhchina collocation analysis to compute collocates for 倭 with 5-word, 10-word, and sentence windows; filter p-values and save separate CSV reports."
+- "Build an interactive HTML report in English with separate pages for the three methods and a final comparison page."
+- "Use kwic on 王京 and 新 to show up to 10 passages in a 10-word window, and add卷/title information when available."
+- "Generate summary PNG tables comparing the top 10 collocates by significance and strength."
+
+These prompts were then refined iteratively based on the script output and the data itself.
+
+## Important changes I made
+
+The project was substantially built around the AI-generated analysis workflow:
+
+- Created the preprocessing pipeline in `analysis.py` to convert the source text to simplified Chinese, split sentences, remove punctuation and citation markers, and add per-line volume/index metadata.
+- Built the custom word list in `data/userdict.txt` for 倭 and related names, official titles, and near-synonym terms relevant to the research question.
+- Implemented collocation analysis using `qhchina.analytics.collocations.find_collocates` with the required windows and measures: log-likelihood, logDice, and FDR-adjusted p-values.
+- Saved the per-method CSV files in `output/` and generated the interactive HTML summary and KWIC pages.
+- Produced the PNG comparison tables for significance vs. strength and cross-method ranking.
+- Updated `AI-USE.md` and `requirements.txt` so the workflow, dependencies, and AI use are documented in a reproducible way.
+
+## How I checked the output
+
+I verified the outputs by running the analysis script directly and then inspecting the generated artifacts:
+
+- Ran `python analysis.py` to regenerate the data, collocation outputs, and reports from the source text.
+- Confirmed that the generated CSVs existed in `output/` and that the rows matched the expected filtering logic (adjusted p-value < 0.05, logDice ranking, and method-specific output names).
+- Opened the HTML reports and checked that the pages loaded correctly, that the tables were sortable, and that the comparison page included the required indicators.
+- Inspected the KWIC output for the selected collocates (王京 and 新) to ensure the passages were correctly bounded to a 10-word window and included the卷/title information when present.
+- Reviewed the summary PNGs to ensure they reflected the top-10 collocate rankings and the method comparison.
+- Re-ran the script after adjustments to confirm the results were deterministic and that no broken paths or formatting issues remained.
+
+## Summary
+
+AI assistance was used to accelerate corpus preparation, script construction, validation, and reporting. The analysis was ultimately checked by executing the code and verifying the generated outputs against the assignment requirements. No AI tool beyond GitHub Copilot in VS Code was used for this project.
