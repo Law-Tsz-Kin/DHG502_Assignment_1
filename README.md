@@ -1,12 +1,12 @@
-Name: LAW Tsz Kin, Ken
+**Name**: LAW Tsz Kin, Ken
 
-Course: DHG 502 Digital Approaches in Historical Research
+**Course**: DHG 502 Digital Approaches in Historical Research
 
-Research Question: Collocation Analysis of “倭” Represent throughout Ming Shi 明史
+**Research Question**: Collocation Analysis of “倭” Represent throughout Ming Shi 明史
 
-Source: Zhang, Tingyu 張廷玉, et al. Ming shi 明史. Digital text dataset. mcjkurz, "qh-starter", GitHub repository, accessed 2026, commit 5d67025. https://github.com/mcjkurz/qh-starter/blob/main/%E6%98%8E%E5%8F%B2.txt.
+**Source**: Zhang, Tingyu 張廷玉, et al. *Ming shi 明史*. Digital text dataset. mcjkurz, "qh-starter", GitHub repository, accessed 2026, commit 5d67025. https://github.com/mcjkurz/qh-starter/blob/main/%E6%98%8E%E5%8F%B2.txt.
 
-Instructions: 
+**Instructions**: 
 - Install opencc, jieba, qhchina.Cconvert 明史.txt to simplified Chinese characters with opencc. Split the content of 明史.txt into sentences based on Chinese sentence-ending punctuation (。！？；). each line per sentence, no space between words, at leat 5 words in a sentence. Create data.txt under data folder, use plain-text UTF-8. Loads a user dictionary for jieba from userdict.txt (one word per line); create this file with the target words I care about: 倭 plus related names and official titles. create a index.csv with the 卷 number and title for each line of data.txt. tokenizes each sentence into words with jieba, removing punctuation marks. prints 20 random segmented sentences that contain one of my target words, so I can check the segmentation by eye. Create AI-USE.md. Create a analysis.py. Create requirements.txt.
 - Finds collocates for the target word "倭", with find_collocates from qhchina.analytics.collocations, and remove classical Chinese stopwords with load_stopwords("zh_cl_sim") from qhchina. Add the measures "log_likelihood" and "logDice", use correction="fdr_bh", and keep only collocates with an adjusted p-value below 0.05. Run it three times: method="window" with horizon=5, method="window" with horizon=10, and method="sentence". Sort each result by log_dice from high to low, save each one to its own CSV in output/ (name the files so I can tell which run is which), and create .csv file for each. Also, print the top 20 rows of each, and create .csv file for each. Update the analysis.py & AI-USE.md & requirements.txt.
 - Reads the CSV files in output/ and builds a html page in English, output/results.html, I want a separated cover page (page 1, title: Collocation Analysis of “倭” Represent throughout Ming Shi 明史), On the top of the html, there should be a bar with button  directed to separated page.And put three results: method="window" with horizon=5(5-Word Analysis), method="window" with horizon=10(10-Word Analysis), and method="sentence(Sentence Analysis) into separate page, each with stat and p value.  In each table, let me click a column header to sort by it, so I can compare the ranking by log_likelihood with the ranking by log_dice. (separted page 2,3,4). Create a separated Page 5 that have a interactive tool that can direct compare 5-word, 10-word, Sentence, make sure the tool have the following indicators: , also allow sort multiple indicators at once. Update the analysis.py & AI-USE.md & requirements.txt.
