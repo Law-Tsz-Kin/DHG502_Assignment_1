@@ -31,5 +31,6 @@ Create Python script of the workflow
 
 
 **How I checked the output**
-
-
+Run analysis.py to regenerate data & outputs
+Review .csv titles and contents, make sure 
+Open the .html and checked that the pages loaded correctly
