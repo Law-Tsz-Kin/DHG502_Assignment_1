@@ -17,7 +17,7 @@ GitHub Copilot Chat via Openrouter, GLM 5.3 Flash Model.
 - Create userdict to extract historical names, locations, and titles relevant to the research question
 - Create .png & .html based on analysis outcomes
 - Create Python script of the workflow
-- Assisted in troubleshooting character-encoding issues and resolving Matplotlib font-fallback configurations
+- Assist in troubleshooting character-encoding issues and resolving Matplotlib font-fallback configurations
 
 **Representative prompts / session excerpts**
 
