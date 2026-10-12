@@ -33,7 +33,7 @@ GitHub Copilot Chat via Openrouter, GLM 5.3 Flash Model.
 - Search for historical text source (*Ming Shi 明史* orginial text) and analysis tools (e.g. qhchina.helpers.texts.load_stopwords)
 - Direct and verify that the generated dictionary integrated correctly and ensure proper historical terms were targeted
 - Historical interpretation of the collocation and KWIC outputs
-- Search for acadenic source for citation
+- Search for academic source for citation
 - Design the study with topic, source, methods to use, indicators and statistical thresholds
 - Redefine .png and .html layout style and data presentation
 - Create README, report and AI-USE
