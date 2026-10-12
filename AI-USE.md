@@ -41,7 +41,7 @@ GitHub Copilot Chat via Openrouter, GLM 5.3 Flash Model.
 **How I checked the output**
 
 - Run analysis.py to regenerate data & outputs
-- Review .csv titles and contents, make sure output use specific methods (e.g. 5-word) or use proper conditions (e.g. p-value < 0.05)
+- Review .csv titles and contents, make sure output use specific methods (e.g. 5-word) or use proper thresholds (e.g. p-value < 0.05)
 - Open the .png & .html and check if the pages loaded & outputs presented correctly
 - Manually check KWIC concordance lines against the original historical chapters
 - Review the .csv ensure the results use the designed methods and statistical thresholds
