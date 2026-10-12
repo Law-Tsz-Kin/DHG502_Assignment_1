@@ -1,9 +1,5 @@
 # AI Use Declaration
 
-**Course**: DHG 502 Digital Approaches in Historical Research
-**Title**: Collocation analysis of "倭" in the *Ming Shi 明史*
-**Name**: LAW Tsz-kin, Ken
-
 **AI tools and models used**
 
 GitHub Copilot Chat via Openrouter, GLM 5.3 Flash Model.
@@ -12,12 +8,12 @@ GitHub Copilot Chat via Openrouter, GLM 5.3 Flash Model.
 
 - Install libraries, such as opencc, jieba, qhchina
 - Convert traditional Chinese text to simplified Chinese
-- Segmentated the text into sentences for analysis with no spaces and puncuations
+- Segmentated the text into sentences for analysis without spaces 
 - Collocation analysis & KWIC Analysis of target word "倭"
 - Create userdict to extract historical names, locations, and titles relevant to the research question
 - Create .png & .html based on analysis outcomes
 - Create Python script of the workflow
-- Assist in troubleshooting character-encoding issues and resolving Matplotlib font-fallback configurations
+- Verify the text encoded with UTF-8
 
 **Representative prompts / session excerpts**
 
